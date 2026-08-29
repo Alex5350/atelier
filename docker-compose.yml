@@ -1,0 +1,23 @@
+# Local development stack for Atelier: PostgreSQL with the pgvector extension.
+# The host port is 5433 because a Homebrew PostgreSQL commonly owns 5432 on
+# development machines; the container always speaks 5432 internally.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: atelier-db
+    environment:
+      POSTGRES_USER: atelier
+      POSTGRES_PASSWORD: atelier-dev
+      POSTGRES_DB: atelier
+    ports:
+      - "5433:5432"
+    volumes:
+      - atelier-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atelier -d atelier"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  atelier-db-data:
