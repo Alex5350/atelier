@@ -2,6 +2,7 @@ import "dotenv/config";
 import { auth } from "@/lib/auth";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
+import { seedModels } from "./seed-models";
 
 /**
  * Seeds the single operator account and its budget row from the environment.
@@ -38,6 +39,7 @@ async function main() {
 
   const [user] = await db.select().from(schema.user).where(eq(schema.user.email, email)).limit(1);
   await db.insert(schema.budgetSettings).values({ userId: user.id }).onConflictDoNothing();
+  await seedModels();
   console.log("budget row ensured; seed complete");
 }
 

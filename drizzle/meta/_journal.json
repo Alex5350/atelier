@@ -15,6 +15,13 @@
       "when": 1788582644689,
       "tag": "0001_first_proemial_gods",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788873280287,
+      "tag": "0002_bouncy_viper",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, boolean, numeric, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, boolean, numeric, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { pgEnum } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -92,17 +92,23 @@ export const models = pgTable("models", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const modelPrices = pgTable("model_prices", {
-  id: text("id").primaryKey(),
-  modelId: text("model_id")
-    .notNull()
-    .references(() => models.id, { onDelete: "cascade" }),
-  effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull().defaultNow(),
-  inputPerMtok: numeric("input_per_mtok", { precision: 12, scale: 6 }),
-  outputPerMtok: numeric("output_per_mtok", { precision: 12, scale: 6 }),
-  perImage: numeric("per_image", { precision: 12, scale: 6 }),
-  perVideoSecond: numeric("per_video_second", { precision: 12, scale: 6 }),
-});
+export const modelPrices = pgTable(
+  "model_prices",
+  {
+    id: text("id").primaryKey(),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => models.id, { onDelete: "cascade" }),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull().defaultNow(),
+    inputPerMtok: numeric("input_per_mtok", { precision: 12, scale: 6 }),
+    outputPerMtok: numeric("output_per_mtok", { precision: 12, scale: 6 }),
+    perImage: numeric("per_image", { precision: 12, scale: 6 }),
+    perVideoSecond: numeric("per_video_second", { precision: 12, scale: 6 }),
+  },
+  // One price row per model per effective instant: repricing is append-only,
+  // and the seed's fixed effective dates make re-runs no-ops.
+  (table) => [uniqueIndex("model_prices_model_effective_idx").on(table.modelId, table.effectiveFrom)],
+);
 
 // ---------------------------------------------------------------------------
 // Usage ledger: append-only, every row pins the price it was charged at

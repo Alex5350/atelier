@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "model_prices_model_effective_idx" ON "model_prices" USING btree ("model_id","effective_from");
