@@ -10,6 +10,7 @@ import {
   type ModelRow,
   type ProviderId,
 } from "./registry";
+import type { EmbeddingModel } from "ai";
 
 /**
  * Server-side model resolution: the single place a model id becomes an AI SDK
@@ -78,4 +79,28 @@ export function tryResolveLanguageModel(row: ModelRow): LanguageModel | null {
   } catch {
     return null;
   }
+}
+
+/** Resolves an embedding-modality registry row the same way, same loud failures. */
+export function resolveEmbeddingModel(row: ModelRow): EmbeddingModel {
+  const status = availability(row, liveProviderStatuses());
+  if (status.status === "disabled") {
+    throw new RegistryError("disabled", `${row.displayName} is disabled`);
+  }
+  if (status.status === "needs-key") {
+    throw new RegistryError(
+      "needs-key",
+      `${row.displayName} needs ${status.missingEnvVar} to be set`,
+    );
+  }
+  if (row.modality !== "embedding") {
+    throw new RegistryError("wrong-modality", `${row.displayName} is not an embedding model`);
+  }
+  if (row.provider === "mock") {
+    throw new RegistryError("wrong-modality", "retrieval needs a real embedding provider");
+  }
+  // The factory functions expose .textEmbeddingModel on the provider instance.
+  return (providers[row.provider] as unknown as { textEmbeddingModel: (id: string) => EmbeddingModel }).textEmbeddingModel(
+    row.modelName,
+  );
 }

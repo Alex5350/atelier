@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { extractText, kindFor, MAX_UPLOAD_BYTES } from "@/lib/files/extract";
 import { storage } from "@/lib/storage";
+import { indexDocument } from "@/lib/files/retrieval";
 
 /**
  * File upload: multipart in, storage blob plus a files row out, with text
@@ -53,6 +54,17 @@ export async function POST(request: Request) {
     extractedText: extracted,
   });
 
+  // Index for retrieval at upload time: chunk always, embed when a provider
+  // is configured (the ledger records the embedding cost when it runs).
+  let chunkCount = 0;
+  if (kind === "document" && extracted && extracted.length > 0) {
+    try {
+      chunkCount = await indexDocument(id, extracted, session.user.id);
+    } catch {
+      chunkCount = 0; // retrieval is an enhancement; context mode is unaffected
+    }
+  }
+
   return Response.json({
     id,
     filename: upload.name,
@@ -61,6 +73,8 @@ export async function POST(request: Request) {
     bytes: upload.size,
     url: `/api/files/${id}`,
     extractedCharacters: extracted?.length ?? 0,
+    chunks: chunkCount,
+    indexedForRetrieval: chunkCount > 0,
   });
 }
 

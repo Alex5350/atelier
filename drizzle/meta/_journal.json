@@ -36,6 +36,13 @@
       "when": 1788878967051,
       "tag": "0004_exotic_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788879367647,
+      "tag": "0005_first_hairball",
+      "breakpoints": true
     }
   ]
 }

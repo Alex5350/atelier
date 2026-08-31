@@ -26,9 +26,24 @@ type PendingFile = {
   kind: "image" | "document";
   bytes: number;
   url: string;
+  mode: "context" | "retrieval";
+  chunks?: number;
 };
 
-type ChatMetadata = { modelId?: string; demo?: boolean; conversationId?: string };
+type CitationSource = {
+  fileId: string;
+  filename: string;
+  ord: number;
+  via: string[];
+  snippet: string;
+};
+
+type ChatMetadata = {
+  modelId?: string;
+  demo?: boolean;
+  conversationId?: string;
+  sources?: CitationSource[];
+};
 
 export function ChatView({
   conversationId,
@@ -138,7 +153,7 @@ export function ChatView({
     if (text.length > 0) {
       parts.push({ type: "text", text });
     }
-    const attachments = uploads.map((file) => file.id);
+    const attachments = uploads.map((file) => ({ id: file.id, mode: file.mode }));
     setUploads([]);
     await sendMessage({ parts }, { ...sendOptions(), body: { ...sendOptions().body, attachments } });
   }
@@ -169,6 +184,26 @@ export function ChatView({
                         DEMO
                       </Badge>
                     ) : null}
+                  </div>
+                ) : null}
+                {message.role === "assistant" &&
+                (message.metadata as ChatMetadata | undefined)?.sources?.length ? (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {(message.metadata as ChatMetadata).sources!.map((source) => (
+                      <span
+                        key={`${source.fileId}-${source.ord}`}
+                        className="flex max-w-72 items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
+                        title={source.snippet}
+                      >
+                        <FileText className="size-3 shrink-0" aria-hidden />
+                        <span className="truncate">
+                          {source.filename} c{source.ord}
+                        </span>
+                        <span className="shrink-0 text-primary/80">
+                          {source.via.join("+") || "rank"}
+                        </span>
+                      </span>
+                    ))}
                   </div>
                 ) : null}
                 <div
@@ -243,6 +278,27 @@ export function ChatView({
                 )}
                 <span className="max-w-40 truncate">{file.filename}</span>
                 <span className="text-muted-foreground">{humanBytes(file.bytes)}</span>
+                {file.kind === "document" ? (
+                  <button
+                    type="button"
+                    title={file.chunks ? "Toggle how this file is used" : "Not indexed; context only"}
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide transition-colors ${
+                      file.mode === "retrieval" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
+                    }`}
+                    disabled={!file.chunks}
+                    onClick={() =>
+                      setUploads((current) =>
+                        current.map((f) =>
+                          f.id === file.id
+                            ? { ...f, mode: f.mode === "context" ? "retrieval" : "context" }
+                            : f,
+                        ),
+                      )
+                    }
+                  >
+                    {file.mode === "retrieval" ? "retrieve" : "context"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   aria-label={`Remove ${file.filename}`}

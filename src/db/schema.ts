@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, boolean, numeric, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, boolean, numeric, jsonb, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
 import { pgEnum } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -221,4 +221,26 @@ export const attachments = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("attachments_conversation_idx").on(table.conversationId)],
+);
+
+// ---------------------------------------------------------------------------
+// Retrieval (phase 6): document chunks with pgvector embeddings. Full-text
+// search runs against the chunk text directly at query time; exact scan is
+// honest at portfolio scale, and an index is a migration away past ~50k chunks
+// ---------------------------------------------------------------------------
+
+export const fileChunks = pgTable(
+  "file_chunks",
+  {
+    id: text("id").primaryKey(),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    ord: integer("ord").notNull(),
+    content: text("content").notNull(),
+    charCount: integer("char_count").notNull(),
+    embedding: vector("embedding", { dimensions: 1536 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("file_chunks_file_idx").on(table.fileId, table.ord)],
 );

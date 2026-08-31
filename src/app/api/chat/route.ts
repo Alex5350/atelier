@@ -16,6 +16,7 @@ import { budgetCapUsd, spendTodayUsd, writeUsageEvent } from "@/lib/usage/querie
 import type { PriceRow } from "@/lib/models/registry";
 import type { ModelMessage } from "ai";
 import { buildFileContextBlock } from "@/lib/files/extract";
+import { buildRetrievalBlock, searchChunks } from "@/lib/files/retrieval";
 import { inlineLocalFileParts } from "@/lib/chat/file-parts";
 import { storage } from "@/lib/storage";
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     messages: UIMessage[];
     conversationId?: string;
     modelId?: string;
-    attachments?: string[];
+    attachments?: Array<{ id: string; mode: "context" | "retrieval" }>;
   };
 
   const registryId = body.modelId ?? "mock/atelier-muse";
@@ -87,17 +88,45 @@ export async function POST(request: Request) {
   // Load this turn's attachments (owner-scoped): documents become a labeled
   // context block; images ride the message as file parts the loader below
   // inlines for real providers.
-  const attachmentRows = body.attachments?.length
+  const attachmentSpecs = body.attachments ?? [];
+  const attachmentRows = attachmentSpecs.length
     ? await db
         .select()
         .from(schema.files)
         .where(eq(schema.files.userId, session.user.id))
-        .then((rows) => rows.filter((row) => body.attachments!.includes(row.id)))
+        .then((rows) => rows.filter((row) => attachmentSpecs.some((spec) => spec.id === row.id)))
     : [];
-  const fileContext = buildFileContextBlock(
-    attachmentRows.filter((row) => row.kind === "document"),
+  const modeFor = (fileId: string): "context" | "retrieval" =>
+    attachmentSpecs.find((spec) => spec.id === fileId)?.mode ?? "context";
+
+  // Context mode: the whole document (truncated head-plus-tail). Retrieval
+  // mode: hybrid search against the user's own words, cited excerpts only.
+  const contextBlock = buildFileContextBlock(
+    attachmentRows.filter((row) => row.kind === "document" && modeFor(row.id) === "context"),
     12_000,
   );
+  const retrievalFileIds = attachmentRows
+    .filter((row) => row.kind === "document" && modeFor(row.id) === "retrieval")
+    .map((row) => row.id);
+  const queryText =
+    body.messages
+      .at(-1)
+      ?.parts?.map((part) => (part.type === "text" ? part.text : ""))
+      .join(" ")
+      .trim() ?? "";
+  let retrieved: Awaited<ReturnType<typeof searchChunks>> = [];
+  if (retrievalFileIds.length > 0 && queryText.length > 0) {
+    retrieved = await searchChunks(queryText, retrievalFileIds, 5);
+  }
+  const retrievalBlock = buildRetrievalBlock(retrieved);
+  const fileContext = [contextBlock, retrievalBlock].filter(Boolean).join("\n\n") || null;
+  const sources = retrieved.map((chunk) => ({
+    fileId: chunk.fileId,
+    filename: chunk.filename,
+    ord: chunk.ord,
+    via: chunk.via,
+    snippet: chunk.content.slice(0, 160),
+  }));
 
   // Persist the incoming user turn. Idempotent by message id: regenerations
   // resend history whose user turns are already stored, and re-saving is a
@@ -120,7 +149,7 @@ export async function POST(request: Request) {
           messageId: last.id,
           conversationId,
           fileId: file.id,
-          mode: "context",
+          mode: modeFor(file.id),
         })
         .onConflictDoNothing();
     }
@@ -209,7 +238,7 @@ export async function POST(request: Request) {
   });
 
   return result.toUIMessageStreamResponse({
-    messageMetadata: () => ({ modelId: registryId, demo: modelRow.isMock, conversationId }),
+    messageMetadata: () => ({ modelId: registryId, demo: modelRow.isMock, conversationId, sources }),
     onFinish: async ({ messages }) => {
       // On abort this is the partial message: history should show exactly
       // what streamed, no more.
