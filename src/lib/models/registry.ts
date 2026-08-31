@@ -126,3 +126,45 @@ export function priceEffectiveAt(prices: PriceRow[], at: Date): PriceRow | null 
   }
   return best;
 }
+
+export type ChatModelChoice = {
+  id: string;
+  displayName: string;
+  provider: ProviderId;
+  isMock: boolean;
+  status: Availability["status"];
+  missingEnvVar?: string;
+};
+
+/**
+ * The chat picker's model list: available text models, with the zero-key demo
+ * model always present and first when no real provider is configured, so the
+ * surface never shows an empty state.
+ */
+export function chatModelChoices(rows: ModelRow[], statuses: ProviderStatus[]): ChatModelChoice[] {
+  const choices = rows
+    .filter((row) => row.modality === "text")
+    .map((row) => {
+      const status = availability(row, statuses);
+      return {
+        id: row.id,
+        displayName: row.displayName,
+        provider: row.provider,
+        isMock: row.isMock,
+        status: status.status,
+        missingEnvVar: status.status === "needs-key" ? status.missingEnvVar : undefined,
+      };
+    });
+
+  const anyRealAvailable = choices.some((choice) => choice.status === "available" && !choice.isMock);
+  const usable = choices.filter((choice) => choice.status === "available");
+  usable.sort((a, b) => {
+    if (a.isMock !== b.isMock) {
+      // Without any configured provider the demo model leads; with one, it
+      // politely moves to the end of the list.
+      return anyRealAvailable ? Number(a.isMock) - Number(b.isMock) : Number(b.isMock) - Number(a.isMock);
+    }
+    return a.displayName.localeCompare(b.displayName);
+  });
+  return usable;
+}

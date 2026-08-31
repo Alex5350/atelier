@@ -111,6 +111,39 @@ export const modelPrices = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Chat (phase 3): conversations with lossless UIMessage parts persistence
+// ---------------------------------------------------------------------------
+
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("New conversation"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("conversations_user_updated_idx").on(table.userId, table.updatedAt)],
+);
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: text("role").notNull(), // user | assistant
+    parts: jsonb("parts").notNull(), // UIMessage parts, stored losslessly
+    modelId: text("model_id").references(() => models.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("messages_conversation_created_idx").on(table.conversationId, table.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
 // Usage ledger: append-only, every row pins the price it was charged at
 // ---------------------------------------------------------------------------
 

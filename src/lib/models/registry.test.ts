@@ -4,6 +4,7 @@ import {
   computeCost,
   priceEffectiveAt,
   providerStatuses,
+  chatModelChoices,
   type ModelRow,
   type PriceRow,
 } from "./registry";
@@ -107,5 +108,33 @@ describe("effective-dated prices", () => {
   test("a price effective in the future is not used", () => {
     const future: PriceRow = { modelId: "m", effectiveFrom: new Date("2027-01-01"), inputPerMtok: "1", outputPerMtok: null, perImage: null, perVideoSecond: null };
     expect(priceEffectiveAt([future], new Date("2026-08-30"))).toBeNull();
+  });
+});
+
+describe("chat model choices", () => {
+  const textRows: ModelRow[] = [
+    row,
+    { ...row, id: "mock/atelier-muse", displayName: "Atelier Muse (demo)", provider: "mock", isMock: true },
+    { ...row, id: "google/gemini-2.5-flash", displayName: "Gemini 2.5 Flash", provider: "google" },
+    { ...row, id: "openai/gpt-image-1", displayName: "GPT Image 1", modality: "image" as const },
+  ];
+
+  test("with no keys configured, only the demo model is offered and it leads", () => {
+    const choices = chatModelChoices(textRows, providerStatuses({}));
+    expect(choices.map((c) => c.id)).toEqual(["mock/atelier-muse"]);
+  });
+
+  test("with a key, real models are offered and the demo model politely moves last", () => {
+    const choices = chatModelChoices(textRows, providerStatuses({ OPENAI_API_KEY: "x" }));
+    expect(choices.map((c) => c.id)).toEqual(["openai/gpt-5.6", "mock/atelier-muse"]);
+  });
+
+  test("image and disabled models never appear in the chat picker", () => {
+    const choices = chatModelChoices(
+      [...textRows, { ...row, id: "disabled/text", enabled: false }],
+      providerStatuses({ OPENAI_API_KEY: "x" }),
+    );
+    expect(choices.some((c) => c.id.includes("gpt-image"))).toBe(false);
+    expect(choices.some((c) => c.id === "disabled/text")).toBe(false);
   });
 });

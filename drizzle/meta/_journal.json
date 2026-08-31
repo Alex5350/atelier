@@ -22,6 +22,13 @@
       "when": 1788873280287,
       "tag": "0002_bouncy_viper",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788875754970,
+      "tag": "0003_colorful_kat_farrell",
+      "breakpoints": true
     }
   ]
 }
