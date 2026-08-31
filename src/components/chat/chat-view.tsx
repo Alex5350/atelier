@@ -16,8 +16,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Square, RotateCcw, Send } from "lucide-react";
+import { Sparkles, Square, RotateCcw, Send, Paperclip, FileText, X } from "lucide-react";
 import type { ChatModelChoice } from "@/lib/models/registry";
+
+type PendingFile = {
+  id: string;
+  filename: string;
+  mime: string;
+  kind: "image" | "document";
+  bytes: number;
+  url: string;
+};
 
 type ChatMetadata = { modelId?: string; demo?: boolean; conversationId?: string };
 
@@ -35,6 +44,9 @@ export function ChatView({
   // Starts empty for brand-new chats; the server assigns the real id on the
   // first turn and it rides back on message metadata.
   const conversationRef = useRef(conversationId === "pending" ? "" : conversationId);
+
+  const [pending, setPending] = useState(false);
+  const [uploads, setUploads] = useState<PendingFile[]>([]);
 
   const { messages, sendMessage, status, stop, regenerate, error, setMessages } = useChat({
     id: conversationId,
@@ -75,12 +87,60 @@ export function ChatView({
     [models],
   );
 
-  async function submit(value: string) {
-    const text = value.trim();
-    if (text.length === 0 || status !== "ready") {
+  function humanBytes(count: number): string {
+    if (count < 1024) {
+      return count + " B";
+    }
+    if (count < 1024 * 1024) {
+      return Math.round(count / 1024) + " KB";
+    }
+    return (count / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  async function upload(files: FileList | null) {
+    if (!files || files.length === 0) {
       return;
     }
-    await sendMessage({ text }, sendOptions());
+    setPending(true);
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.set("file", file);
+        const response = await fetch("/api/files", { method: "POST", body: form });
+        if (!response.ok) {
+          const detail = await response.json().catch(() => null);
+          window.alert(detail?.error ? `Upload failed: ${detail.error}` : "Upload failed");
+          continue;
+        }
+        const uploaded = (await response.json()) as PendingFile;
+        setUploads((current) => [...current, uploaded]);
+      }
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function submit(value: string) {
+    const text = value.trim();
+    if ((text.length === 0 && uploads.length === 0) || status !== "ready") {
+      return;
+    }
+    // Attachments ride the message as file parts: images for the model to see,
+    // documents as reference chips in history (their text is injected
+    // server-side as context).
+    const fileParts = uploads.map((file) => ({
+      type: "file" as const,
+      mediaType: file.mime,
+      filename: file.filename,
+      url: file.url,
+    }));
+    const parts: Array<{ type: "text"; text: string } | (typeof fileParts)[number]> = [...fileParts];
+    if (text.length > 0) {
+      parts.push({ type: "text", text });
+    }
+    const attachments = uploads.map((file) => file.id);
+    setUploads([]);
+    await sendMessage({ parts }, { ...sendOptions(), body: { ...sendOptions().body, attachments } });
   }
 
   return (
@@ -123,6 +183,29 @@ export function ChatView({
                       <div key={index} className="prose-invert break-words leading-relaxed [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
                       </div>
+                    ) : part.type === "file" ? (
+                      part.mediaType.startsWith("image/") ? (
+                        <a key={index} href={part.url} target="_blank" rel="noreferrer" className="mt-1.5 block">
+                          {/* Authenticated user blobs; next/image optimization does not apply. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={part.url}
+                            alt={part.filename ?? "attached image"}
+                            className="max-h-56 rounded-lg ring-1 ring-border/60"
+                          />
+                        </a>
+                      ) : (
+                        <a
+                          key={index}
+                          href={part.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1.5 flex w-fit items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 px-2.5 py-1 text-xs transition-colors hover:bg-accent"
+                        >
+                          <FileText className="size-3.5 text-muted-foreground" aria-hidden />
+                          {part.filename ?? "attachment"}
+                        </a>
+                      )
                     ) : null,
                   )}
                 </div>
@@ -144,7 +227,53 @@ export function ChatView({
       </ScrollArea>
 
       <div className="mt-3 border-t border-border/60 pt-3">
+        {uploads.length > 0 ? (
+          <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
+            {uploads.map((file) => (
+              <span
+                key={file.id}
+                className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 py-1 pl-2 pr-1 text-xs"
+              >
+                {file.kind === "image" ? (
+                  // Authenticated user blobs; next/image optimization does not apply.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={file.url} alt="" className="size-4 rounded-sm object-cover" />
+                ) : (
+                  <FileText className="size-3.5 text-muted-foreground" aria-hidden />
+                )}
+                <span className="max-w-40 truncate">{file.filename}</span>
+                <span className="text-muted-foreground">{humanBytes(file.bytes)}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.filename}`}
+                  className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  onClick={() => setUploads((current) => current.filter((f) => f.id !== file.id))}
+                >
+                  <X className="size-3" aria-hidden />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
         <div className="mx-auto flex max-w-3xl items-start gap-2">
+          <label
+            className={pending ? "pointer-events-none opacity-50" : ""}
+            title="Attach images or documents"
+          >
+            <input
+              type="file"
+              multiple
+              className="hidden"
+              accept="image/png,image/jpeg,image/webp,image/gif,text/plain,text/markdown,text/csv,application/pdf"
+              onChange={(event) => {
+                void upload(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <span className="flex size-10 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:bg-accent">
+              <Paperclip className="size-4" aria-hidden />
+            </span>
+          </label>
           <Select
             value={modelId}
             onValueChange={(value) => {

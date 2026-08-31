@@ -180,3 +180,45 @@ export const budgetSettings = pgTable("budget_settings", {
   dailyCapUsd: numeric("daily_cap_usd", { precision: 10, scale: 2 }).notNull().default("5"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ---------------------------------------------------------------------------
+// Files and attachments (phase 5): uploads live in blob storage, extracted
+// text lives on the row, and attachments bind files to chat turns with an
+// explicit mode (context now, retrieval in phase 6)
+// ---------------------------------------------------------------------------
+
+export const files = pgTable(
+  "files",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    storageKey: text("storage_key").notNull(),
+    filename: text("filename").notNull(),
+    mime: text("mime").notNull(),
+    bytes: integer("bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    kind: text("kind").notNull(), // image | document
+    extractedText: text("extracted_text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("files_user_idx").on(table.userId)],
+);
+
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id").references(() => messages.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    mode: text("mode").notNull().default("context"), // context | retrieval
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("attachments_conversation_idx").on(table.conversationId)],
+);

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { convertToModelMessages, streamText, type UIMessage } from "ai";
 import { db, schema } from "@/db";
 import { auth } from "@/lib/auth";
@@ -14,6 +14,10 @@ import { headers } from "next/headers";
 import { approxTokens, budgetDecision, estimateTextCostUsd } from "@/lib/usage/core";
 import { budgetCapUsd, spendTodayUsd, writeUsageEvent } from "@/lib/usage/queries";
 import type { PriceRow } from "@/lib/models/registry";
+import type { ModelMessage } from "ai";
+import { buildFileContextBlock } from "@/lib/files/extract";
+import { inlineLocalFileParts } from "@/lib/chat/file-parts";
+import { storage } from "@/lib/storage";
 
 export const maxDuration = 60;
 
@@ -33,6 +37,7 @@ export async function POST(request: Request) {
     messages: UIMessage[];
     conversationId?: string;
     modelId?: string;
+    attachments?: string[];
   };
 
   const registryId = body.modelId ?? "mock/atelier-muse";
@@ -79,6 +84,21 @@ export async function POST(request: Request) {
     conversationId = created.id;
   }
 
+  // Load this turn's attachments (owner-scoped): documents become a labeled
+  // context block; images ride the message as file parts the loader below
+  // inlines for real providers.
+  const attachmentRows = body.attachments?.length
+    ? await db
+        .select()
+        .from(schema.files)
+        .where(eq(schema.files.userId, session.user.id))
+        .then((rows) => rows.filter((row) => body.attachments!.includes(row.id)))
+    : [];
+  const fileContext = buildFileContextBlock(
+    attachmentRows.filter((row) => row.kind === "document"),
+    12_000,
+  );
+
   // Persist the incoming user turn. Idempotent by message id: regenerations
   // resend history whose user turns are already stored, and re-saving is a
   // no-op.
@@ -91,6 +111,19 @@ export async function POST(request: Request) {
       parts: last.parts,
       modelId: null,
     });
+    // Attachment rows reference the message, so the message lands first.
+    for (const file of attachmentRows) {
+      await db
+        .insert(schema.attachments)
+        .values({
+          id: crypto.randomUUID(),
+          messageId: last.id,
+          conversationId,
+          fileId: file.id,
+          mode: "context",
+        })
+        .onConflictDoNothing();
+    }
     const [conversation] = await db
       .select()
       .from(schema.conversations)
@@ -137,9 +170,30 @@ export async function POST(request: Request) {
     );
   }
 
+  const loader = async (id: string) => {
+    const [file] = await db
+      .select()
+      .from(schema.files)
+      .where(and(eq(schema.files.id, id), eq(schema.files.userId, session.user.id)))
+      .limit(1);
+    if (!file) {
+      return null;
+    }
+    try {
+      const blob = await storage.get(file.storageKey);
+      return { mime: file.mime, bytes: new Uint8Array(blob.bytes) };
+    } catch {
+      return null;
+    }
+  };
+
+  let modelMessages: ModelMessage[] = await convertToModelMessages(body.messages);
+  modelMessages = await inlineLocalFileParts(modelMessages, loader);
+
   const result = streamText({
     model: languageModel,
-    messages: await convertToModelMessages(body.messages),
+    messages: modelMessages,
+    system: fileContext ?? undefined,
     onFinish: async ({ totalUsage }) => {
       // The ledger write: usage as the provider reported it, cost estimated
       // from the price row in effect right now (pinned by the write).

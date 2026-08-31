@@ -44,3 +44,4 @@ next-env.d.ts
 # them committed (demo values only, never real secrets).
 !docker-compose.yml
 !.env.example
+.data/
