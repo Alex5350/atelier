@@ -15,8 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, Layers } from "lucide-react";
 import type { ImageModelChoice } from "@/lib/models/registry";
+
+export type ReferenceChoice = { id: string; passSeq: number; seed: number | null };
 
 const BATCHES = [1, 2, 4, 6, 8];
 const ASPECTS = [
@@ -32,9 +34,11 @@ const ASPECTS = [
 export function PassComposer({
   projectId,
   models,
+  references,
 }: {
   projectId: string;
   models: ImageModelChoice[];
+  references: ReferenceChoice[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -44,8 +48,21 @@ export function PassComposer({
   const [batchSize, setBatchSize] = useState(2);
   const [aspect, setAspect] = useState("square");
   const [seed, setSeed] = useState("");
+  const [baseId, setBaseId] = useState("none");
+  const [styleIds, setStyleIds] = useState<string[]>([]);
 
   const anyMock = models.some((model) => model.isMock);
+
+  function referencePayload() {
+    const chosen: Array<{ assetId: string; role: "base" | "style" }> = [];
+    if (baseId !== "none") {
+      chosen.push({ assetId: baseId, role: "base" });
+    }
+    for (const styleId of styleIds) {
+      chosen.push({ assetId: styleId, role: "style" });
+    }
+    return chosen;
+  }
 
   async function run() {
     if (prompt.trim().length === 0 || busy) {
@@ -63,11 +80,14 @@ export function PassComposer({
           batchSize,
           aspect,
           seed: seed.trim().length > 0 ? Number(seed) : null,
+          references: referencePayload(),
         }),
       });
       if (!created.ok) {
         const detail = await created.json().catch(() => null);
-        toast.error(detail?.error ? String(detail.error) : "Could not create the pass");
+        toast.error(
+          detail?.message ? String(detail.message) : detail?.error ? String(detail.error) : "Could not create the pass",
+        );
         return;
       }
       const { id } = (await created.json()) as { id: string };
@@ -171,6 +191,59 @@ export function PassComposer({
               inputMode="numeric"
             />
           </div>
+          {references.length > 0 ? (
+            <>
+              <div className="grid gap-1">
+                <Label className="text-xs text-muted-foreground">Base (composition)</Label>
+                <Select value={baseId} onValueChange={(value) => setBaseId(value ?? "none")}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">none</SelectItem>
+                    {references.map((asset) => (
+                      <SelectItem key={asset.id} value={asset.id}>
+                        pass {asset.passSeq}
+                        {asset.seed !== null ? ` seed ${asset.seed}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1">
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Layers className="size-3" aria-hidden /> Style (aesthetics, up to 3)
+                </Label>
+                <div className="flex max-w-72 flex-wrap gap-1.5">
+                  {references.map((asset) => {
+                    const selected = styleIds.includes(asset.id);
+                    return (
+                      <button
+                        key={asset.id}
+                        type="button"
+                        className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                          selected
+                            ? "border-primary/50 bg-primary/15 text-primary"
+                            : "border-border/60 bg-muted/40 text-muted-foreground hover:bg-accent"
+                        }`}
+                        onClick={() =>
+                          setStyleIds((current) =>
+                            current.includes(asset.id)
+                              ? current.filter((id) => id !== asset.id)
+                              : current.length < 3
+                                ? [...current, asset.id]
+                                : current,
+                          )
+                        }
+                      >
+                        pass {asset.passSeq}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : null}
           <Button onClick={() => void run()} disabled={working || prompt.trim().length === 0}>
             {working ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
             Run pass

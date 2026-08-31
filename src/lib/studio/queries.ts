@@ -123,3 +123,72 @@ export const ASPECT_SIZES: Record<string, `${number}x${number}`> = {
 export function sizeForAspect(aspect: string | undefined): `${number}x${number}` {
   return ASPECT_SIZES[aspect ?? "square"] ?? ASPECT_SIZES.square;
 }
+
+/** Assets eligible as references: active and approved, across the project. */
+export async function eligibleReferenceAssets(projectId: string) {
+  return db
+    .select({
+      id: schema.assets.id,
+      passSeq: schema.passes.seq,
+      seed: schema.assets.seed,
+      reviewStatus: schema.assets.reviewStatus,
+    })
+    .from(schema.assets)
+    .innerJoin(schema.passes, eq(schema.passes.id, schema.assets.passId))
+    .where(
+      and(
+        eq(schema.passes.projectId, projectId),
+        eq(schema.assets.isActive, true),
+        eq(schema.assets.reviewStatus, "approved"),
+      ),
+    )
+    .orderBy(schema.passes.seq, schema.assets.createdAt);
+}
+
+/** The lineage edge list: every reference as (from pass, to asset's pass). */
+export async function lineageEdges(projectId: string) {
+  const rows = await db
+    .select({
+      referenceId: schema.assetReferences.id,
+      role: schema.assetReferences.role,
+      referencingPassId: schema.passes.id,
+      referencingSeq: schema.passes.seq,
+      referencedAssetId: schema.assets.id,
+      referencedPassId: schema.assets.passId,
+    })
+    .from(schema.assetReferences)
+    .innerJoin(schema.passes, eq(schema.passes.id, schema.assetReferences.passId))
+    .innerJoin(schema.assets, eq(schema.assets.id, schema.assetReferences.assetId))
+    .where(eq(schema.passes.projectId, projectId));
+  return rows;
+}
+
+export async function referencesForPasses(passIds: string[]) {
+  if (passIds.length === 0) {
+    return [];
+  }
+  const { inArray } = await import("drizzle-orm");
+  return db
+    .select()
+    .from(schema.assetReferences)
+    .where(inArray(schema.assetReferences.passId, passIds));
+}
+
+/** Owner-scoped review decision on an asset. */
+export async function setAssetReview(
+  userId: string,
+  assetId: string,
+  review: "approved" | "rejected" | "pending",
+) {
+  const [row] = await db
+    .select({ id: schema.assets.id })
+    .from(schema.assets)
+    .innerJoin(schema.passes, eq(schema.passes.id, schema.assets.passId))
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.passes.projectId))
+    .where(and(eq(schema.assets.id, assetId), eq(schema.projects.userId, userId)))
+    .limit(1);
+  if (!row) {
+    throw new Error("unknown asset");
+  }
+  await db.update(schema.assets).set({ reviewStatus: review }).where(eq(schema.assets.id, assetId));
+}

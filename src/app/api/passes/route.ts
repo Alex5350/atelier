@@ -19,6 +19,7 @@ export async function POST(request: Request) {
     batchSize?: number;
     aspect?: string;
     seed?: number | null;
+    references?: Array<{ assetId: string; role: "base" | "style" }>;
   };
 
   if (!body.projectId || !body.prompt || body.prompt.trim().length === 0) {
@@ -49,5 +50,32 @@ export async function POST(request: Request) {
     aspect,
     seed,
   });
+
+  // References land through the gating trigger: only approved assets pass,
+  // and the error names the offender for the client to surface.
+  const references = (body.references ?? []).slice(0, 4);
+  const bases = references.filter((ref) => ref.role === "base");
+  if (bases.length > 1) {
+    return Response.json({ error: "one-base-max" }, { status: 400 });
+  }
+  for (const reference of references) {
+    try {
+      await db.insert(schema.assetReferences).values({
+        id: crypto.randomUUID(),
+        passId: id,
+        assetId: reference.assetId,
+        role: reference.role,
+      });
+    } catch (error) {
+      // Prefer the trigger's own words (drizzle wraps them in a cause).
+      const cause = (error as { cause?: { message?: string } })?.cause?.message;
+      const message = cause ?? (error instanceof Error ? error.message : "reference rejected");
+      await db.delete(schema.passes).where(eq(schema.passes.id, id));
+      return Response.json(
+        { error: "gated-reference", message: message.replace(/\s+/g, " ") },
+        { status: 409 },
+      );
+    }
+  }
   return Response.json({ id }, { status: 201 });
 }

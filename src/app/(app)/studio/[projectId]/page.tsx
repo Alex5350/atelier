@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/session";
-import { getProject, listPassesWithAssets } from "@/lib/studio/queries";
+import { eligibleReferenceAssets, getProject, lineageEdges, listPassesWithAssets } from "@/lib/studio/queries";
 import { imageModelChoices } from "@/lib/models/registry";
 import { liveProviderStatuses } from "@/lib/models/server";
 import { PassComposer } from "@/components/studio/pass-composer";
 import { PassTimeline } from "@/components/studio/pass-timeline";
+import { LineageCard } from "@/components/studio/lineage-graph";
 import { db } from "@/db";
 import { schema } from "@/db";
 import { MotionStagger, MotionItem } from "@/components/app/motion";
@@ -42,6 +43,8 @@ export default async function ProjectPage({
   );
 
   const assetTotal = passes.reduce((sum, pass) => sum + pass.assets.length, 0);
+  const references = await eligibleReferenceAssets(projectId);
+  const lineage = await lineageEdges(projectId);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -64,7 +67,7 @@ export default async function ProjectPage({
 
       <MotionItem>
         {models.length > 0 ? (
-          <PassComposer projectId={projectId} models={models} />
+          <PassComposer projectId={projectId} models={models} references={references} />
         ) : (
           <div className="rounded-xl border border-dashed border-border/60 px-6 py-8 text-center text-sm text-muted-foreground">
             No image models are enabled. Enable one in Admin (the demo sketchpad needs no keys).
@@ -72,7 +75,8 @@ export default async function ProjectPage({
         )}
       </MotionItem>
 
-      <PassTimeline passes={passes} />
+      <PassTimeline passes={passes} lineage={lineage} />
+      <LineageCard passes={passes} lineage={lineage} />
     </div>
   );
 }

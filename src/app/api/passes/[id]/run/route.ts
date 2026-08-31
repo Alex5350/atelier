@@ -95,6 +95,52 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     );
   }
 
+  // Gating re-check at run time with friendly errors (the trigger already
+  // guards the write path; this guards execution against status changes).
+  const references = await db
+    .select()
+    .from(schema.assetReferences)
+    .where(eq(schema.assetReferences.passId, pass.id));
+  const gated: Array<{ assetId: string; status: string }> = [];
+  for (const reference of references) {
+    const [asset] = await db
+      .select({ reviewStatus: schema.assets.reviewStatus })
+      .from(schema.assets)
+      .where(eq(schema.assets.id, reference.assetId))
+      .limit(1);
+    if (!asset || asset.reviewStatus !== "approved") {
+      gated.push({ assetId: reference.assetId, status: asset?.reviewStatus ?? "missing" });
+    }
+  }
+  if (gated.length > 0) {
+    return Response.json(
+      {
+        error: "gated-reference",
+        message: `references not approved: ${gated.map((g) => `${g.assetId.slice(0, 8)} (${g.status})`).join(", ")}`,
+      },
+      { status: 409 },
+    );
+  }
+
+  // The base reference feeds edit-capable providers as the input image.
+  const baseReference = references.find((reference) => reference.role === "base");
+  let baseBytes: Uint8Array | null = null;
+  if (baseReference && !modelRow.isMock) {
+    const [asset] = await db
+      .select()
+      .from(schema.assets)
+      .where(eq(schema.assets.id, baseReference.assetId))
+      .limit(1);
+    if (asset) {
+      try {
+        const blob = await storage.get(asset.storageKey);
+        baseBytes = new Uint8Array(blob.bytes);
+      } catch {
+        baseBytes = null;
+      }
+    }
+  }
+
   const settings = (pass.settings ?? {}) as { aspect?: string; seed?: number | null };
   const size = sizeForAspect(settings.aspect);
   const baseSeed = typeof settings.seed === "number" ? settings.seed : 0;
@@ -120,6 +166,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
         prompt: pass.prompt,
         size,
         seed,
+        ...(baseBytes ? { images: [baseBytes] } : {}),
       });
       const bytes = image.uint8Array;
       const { key } = await storage.put(bytes, "image/png");

@@ -5,8 +5,18 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2, RotateCcw, ThumbsUp, ThumbsDown, Undo2, Columns2, X } from "lucide-react";
+import { reviewAsset } from "@/app/(app)/studio/[projectId]/actions";
+
+type LineageEdge = {
+  referenceId: string;
+  role: string;
+  referencingPassId: string;
+  referencingSeq: number;
+  referencedAssetId: string;
+  referencedPassId: string;
+};
 
 type TimelinePass = {
   id: string;
@@ -37,8 +47,26 @@ const STATUS_CLASS: Record<string, string> = {
  * The pass timeline: newest first, each pass showing its active assets (and
  * its superseded history dimmed), with regenerate on completed passes.
  */
-export function PassTimeline({ passes }: { passes: TimelinePass[] }) {
+export function PassTimeline({
+  passes,
+  lineage,
+}: {
+  passes: TimelinePass[];
+  lineage: LineageEdge[];
+}) {
   const ordered = [...passes].sort((a, b) => b.seq - a.seq);
+  const [compare, setCompare] = useState<string[]>([]);
+  const referencedIds = new Set(lineage.map((edge) => edge.referencedAssetId));
+
+  function toggleCompare(assetId: string) {
+    setCompare((current) =>
+      current.includes(assetId)
+        ? current.filter((id) => id !== assetId)
+        : current.length < 4
+          ? [...current, assetId]
+          : current,
+    );
+  }
 
   if (ordered.length === 0) {
     return (
@@ -50,14 +78,59 @@ export function PassTimeline({ passes }: { passes: TimelinePass[] }) {
 
   return (
     <div className="space-y-4">
+      {compare.length >= 2 ? (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="flex items-center gap-2 font-heading text-base">
+              <Columns2 className="size-4 text-primary" aria-hidden /> Comparing {compare.length}
+            </CardTitle>
+            <Button size="sm" variant="ghost" className="h-7" onClick={() => setCompare([])}>
+              <X className="size-3.5" aria-hidden /> Clear
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div
+              className="grid gap-3"
+              style={{ gridTemplateColumns: `repeat(${compare.length}, minmax(0, 1fr))` }}
+            >
+              {compare.map((assetId) => (
+                // Authenticated generated blobs; next/image does not apply.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={assetId}
+                  src={`/api/assets/${assetId}`}
+                  alt="Comparison asset"
+                  className="w-full rounded-lg object-contain ring-1 ring-border/60"
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       {ordered.map((pass) => (
-        <PassCard key={pass.id} pass={pass} />
+        <PassCard
+          key={pass.id}
+          pass={pass}
+          compare={compare}
+          onToggleCompare={toggleCompare}
+          referencedIds={referencedIds}
+        />
       ))}
     </div>
   );
 }
 
-function PassCard({ pass }: { pass: TimelinePass }) {
+function PassCard({
+  pass,
+  compare,
+  onToggleCompare,
+  referencedIds,
+}: {
+  pass: TimelinePass;
+  compare: string[];
+  onToggleCompare: (assetId: string) => void;
+  referencedIds: Set<string>;
+}) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
@@ -122,21 +195,73 @@ function PassCard({ pass }: { pass: TimelinePass }) {
           <>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
               {active.map((asset) => (
-                <a
+                <div
                   key={asset.id}
-                  href={`/api/assets/${asset.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group block overflow-hidden rounded-lg ring-1 ring-border/60"
+                  className={`group relative overflow-hidden rounded-lg ring-1 transition-all ${
+                    compare.includes(asset.id) ? "ring-2 ring-primary" : "ring-border/60"
+                  } ${asset.reviewStatus === "rejected" ? "opacity-50" : ""}`}
                 >
-                  {/* Authenticated generated blobs; next/image does not apply. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`/api/assets/${asset.id}`}
-                    alt={`Pass ${pass.seq} asset${asset.seed !== null ? `, seed ${asset.seed}` : ""}`}
-                    className="aspect-square w-full object-cover transition-opacity group-hover:opacity-90"
-                  />
-                </a>
+                  <button
+                    type="button"
+                    className="block w-full"
+                    title="Click to toggle comparison"
+                    onClick={() => onToggleCompare(asset.id)}
+                  >
+                    {/* Authenticated generated blobs; next/image does not apply. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/assets/${asset.id}`}
+                      alt={`Pass ${pass.seq} asset${asset.seed !== null ? `, seed ${asset.seed}` : ""}`}
+                      className="aspect-square w-full object-cover transition-opacity group-hover:opacity-90"
+                    />
+                  </button>
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-background/80 px-1.5 py-1 opacity-0 backdrop-blur transition-opacity group-hover:opacity-100">
+                    <span
+                      className={`rounded px-1 text-[10px] uppercase ${
+                        asset.reviewStatus === "approved"
+                          ? "text-emerald-300"
+                          : asset.reviewStatus === "rejected"
+                            ? "text-destructive"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {asset.reviewStatus}
+                      {referencedIds.has(asset.id) ? " · used" : ""}
+                    </span>
+                    <span className="flex gap-0.5">
+                      {asset.reviewStatus !== "approved" ? (
+                        <button
+                          type="button"
+                          title="Approve (makes this asset referenceable)"
+                          className="rounded p-0.5 text-emerald-300 hover:bg-accent"
+                          onClick={() => void reviewAsset(asset.id, "approved").then(() => router.refresh())}
+                        >
+                          <ThumbsUp className="size-3" aria-hidden />
+                        </button>
+                      ) : null}
+                      {asset.reviewStatus !== "rejected" ? (
+                        <button
+                          type="button"
+                          title="Reject (blocks referencing)"
+                          className="rounded p-0.5 text-destructive hover:bg-accent"
+                          onClick={() => void reviewAsset(asset.id, "rejected").then(() => router.refresh())}
+                        >
+                          <ThumbsDown className="size-3" aria-hidden />
+                        </button>
+                      ) : null}
+                      {asset.reviewStatus !== "pending" ? (
+                        <button
+                          type="button"
+                          title="Reset to pending"
+                          className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+                          onClick={() => void reviewAsset(asset.id, "pending").then(() => router.refresh())}
+                        >
+                          <Undo2 className="size-3" aria-hidden />
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
             {superseded.length > 0 ? (
