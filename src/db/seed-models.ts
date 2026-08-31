@@ -105,6 +105,22 @@ const ROSTER: Array<{ model: SeedModel; prices: SeedPrice[] }> = [
   },
   {
     model: {
+      id: "mock/atelier-sketchpad",
+      displayName: "Atelier Sketchpad (demo)",
+      provider: "mock",
+      modality: "image",
+      modelName: "atelier-sketchpad",
+      capabilities: ["text-to-image", "image-edit", "deterministic", "zero-key"],
+      enabled: true,
+      isMock: true,
+      notes: "Built-in demo image model: deterministic abstract compositions, watermarked DEMO, no provider key.",
+    },
+    prices: [
+      { perImage: "0" },
+    ],
+  },
+  {
+    model: {
       id: "openai/gpt-image-1",
       displayName: "GPT Image 1",
       provider: "openai",

@@ -4,13 +4,14 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LanguageModel } from "ai";
 import { createMockLanguageModel } from "./mock-model";
+import { createMockImageModel } from "./mock-image";
 import {
   availability,
   providerStatuses,
   type ModelRow,
   type ProviderId,
 } from "./registry";
-import type { EmbeddingModel } from "ai";
+import type { EmbeddingModel, ImageModel } from "ai";
 
 /**
  * Server-side model resolution: the single place a model id becomes an AI SDK
@@ -103,4 +104,26 @@ export function resolveEmbeddingModel(row: ModelRow): EmbeddingModel {
   return (providers[row.provider] as unknown as { textEmbeddingModel: (id: string) => EmbeddingModel }).textEmbeddingModel(
     row.modelName,
   );
+}
+
+/** Resolves an image-modality registry row; the mock sketchpad needs no key. */
+export function resolveImageModel(row: ModelRow): ImageModel {
+  const status = availability(row, liveProviderStatuses());
+  if (status.status === "disabled") {
+    throw new RegistryError("disabled", `${row.displayName} is disabled`);
+  }
+  if (status.status === "needs-key") {
+    throw new RegistryError(
+      "needs-key",
+      `${row.displayName} needs ${status.missingEnvVar} to be set`,
+    );
+  }
+  if (row.modality !== "image") {
+    throw new RegistryError("wrong-modality", `${row.displayName} is not an image model`);
+  }
+  if (row.provider === "mock") {
+    return createMockImageModel(row.modelName);
+  }
+  const provider = providers[row.provider] as unknown as { image: (id: string) => ImageModel };
+  return provider.image(row.modelName);
 }

@@ -14,7 +14,7 @@ export type NavItem = {
  */
 export const navItems: NavItem[] = [
   { title: "Chat", href: "/chat", icon: MessagesSquare },
-  { title: "Studio", href: "/studio", icon: Images, badge: "Soon" },
+  { title: "Studio", href: "/studio", icon: Images },
   { title: "Usage", href: "/usage", icon: Wallet },
   { title: "Admin", href: "/admin", icon: Settings2 },
 ];

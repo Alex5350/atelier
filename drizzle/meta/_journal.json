@@ -43,6 +43,13 @@
       "when": 1788879367647,
       "tag": "0005_first_hairball",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788879577814,
+      "tag": "0006_jittery_valkyrie",
+      "breakpoints": true
     }
   ]
 }

@@ -244,3 +244,84 @@ export const fileChunks = pgTable(
   },
   (table) => [index("file_chunks_file_idx").on(table.fileId, table.ord)],
 );
+
+// ---------------------------------------------------------------------------
+// The passes studio (phase 7): projects hold passes, passes emit assets,
+// references point at specific assets. Append-only regenerate: superseded
+// assets stay for history and comparison; is_active marks the current set.
+// ---------------------------------------------------------------------------
+
+export const projects = pgTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("Untitled project"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("projects_user_idx").on(table.userId, table.updatedAt)],
+);
+
+export const passKinds = ["generate", "inpaint", "outpaint", "upscale"] as const;
+export const passKindEnum = pgEnum("pass_kind", passKinds);
+export const passStatuses = ["draft", "running", "completed", "failed"] as const;
+export const passStatusEnum = pgEnum("pass_status", passStatuses);
+
+export const passes = pgTable(
+  "passes",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    kind: passKindEnum("kind").notNull().default("generate"),
+    status: passStatusEnum("status").notNull().default("draft"),
+    prompt: text("prompt").notNull().default(""),
+    modelId: text("model_id").references(() => models.id),
+    batchSize: integer("batch_size").notNull().default(1),
+    settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("passes_project_seq_idx").on(table.projectId, table.seq)],
+);
+
+export const assets = pgTable(
+  "assets",
+  {
+    id: text("id").primaryKey(),
+    passId: text("pass_id")
+      .notNull()
+      .references(() => passes.id, { onDelete: "cascade" }),
+    storageKey: text("storage_key").notNull(),
+    mime: text("mime").notNull().default("image/png"),
+    width: integer("width"),
+    height: integer("height"),
+    seed: integer("seed"),
+    isActive: boolean("is_active").notNull().default(true),
+    reviewStatus: text("review_status").notNull().default("pending"), // pending | approved | rejected
+    reviewNote: text("review_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("assets_pass_idx").on(table.passId, table.createdAt)],
+);
+
+export const assetReferences = pgTable(
+  "asset_references",
+  {
+    id: text("id").primaryKey(),
+    passId: text("pass_id")
+      .notNull()
+      .references(() => passes.id, { onDelete: "cascade" }),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => assets.id, { onDelete: "cascade" }),
+    role: text("role").notNull(), // base | style
+  },
+  (table) => [uniqueIndex("asset_references_pass_asset_role_idx").on(table.passId, table.assetId, table.role)],
+);
