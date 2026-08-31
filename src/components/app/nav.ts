@@ -13,7 +13,7 @@ export type NavItem = {
  * the cost story is visible from day one.
  */
 export const navItems: NavItem[] = [
-  { title: "Chat", href: "/chat", icon: MessagesSquare, badge: "Soon" },
+  { title: "Chat", href: "/chat", icon: MessagesSquare },
   { title: "Studio", href: "/studio", icon: Images, badge: "Soon" },
   { title: "Usage", href: "/usage", icon: Wallet },
   { title: "Admin", href: "/admin", icon: Settings2 },

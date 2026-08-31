@@ -11,6 +11,9 @@ import {
   touchConversation,
 } from "@/lib/chat/queries";
 import { headers } from "next/headers";
+import { approxTokens, budgetDecision, estimateTextCostUsd } from "@/lib/usage/core";
+import { budgetCapUsd, spendTodayUsd, writeUsageEvent } from "@/lib/usage/queries";
+import type { PriceRow } from "@/lib/models/registry";
 
 export const maxDuration = 60;
 
@@ -101,9 +104,54 @@ export async function POST(request: Request) {
     }
   }
 
+  // Budget gate before any provider work: today's ledger spend plus a
+  // conservative estimate for this turn must fit under the daily cap. The
+  // refusal is a typed state the client presents, not an opaque error, and it
+  // happens before a single token is billed.
+  const prices: PriceRow[] = (
+    await db.select().from(schema.modelPrices).where(eq(schema.modelPrices.modelId, registryId))
+  ).map((row) => ({
+    modelId: row.modelId,
+    effectiveFrom: row.effectiveFrom,
+    inputPerMtok: row.inputPerMtok,
+    outputPerMtok: row.outputPerMtok,
+    perImage: row.perImage,
+    perVideoSecond: row.perVideoSecond,
+  }));
+  const promptTokens = approxTokens(JSON.stringify(body.messages));
+  const decision = budgetDecision(
+    await spendTodayUsd(session.user.id),
+    await budgetCapUsd(session.user.id),
+    estimateTextCostUsd(prices, new Date(), promptTokens, 1024),
+  );
+  if (!decision.allowed) {
+    return Response.json(
+      {
+        error: "budget-exceeded",
+        message:
+          `Daily budget: $${decision.spentUsd.toFixed(2)} spent of the $${decision.capUsd.toFixed(2)} cap, ` +
+          `and this turn estimates $${decision.estimateUsd.toFixed(4)}. The cap resets at midnight UTC; ` +
+          "adjust it on the Usage page.",
+      },
+      { status: 402 },
+    );
+  }
+
   const result = streamText({
     model: languageModel,
     messages: await convertToModelMessages(body.messages),
+    onFinish: async ({ totalUsage }) => {
+      // The ledger write: usage as the provider reported it, cost estimated
+      // from the price row in effect right now (pinned by the write).
+      await writeUsageEvent({
+        userId: session.user.id,
+        modelId: registryId,
+        kind: "text",
+        inputTokens: totalUsage.inputTokens ?? 0,
+        outputTokens: totalUsage.outputTokens ?? 0,
+        conversationId,
+      });
+    },
   });
 
   return result.toUIMessageStreamResponse({
