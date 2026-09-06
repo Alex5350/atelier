@@ -325,3 +325,42 @@ export const assetReferences = pgTable(
   },
   (table) => [uniqueIndex("asset_references_pass_asset_role_idx").on(table.passId, table.assetId, table.role)],
 );
+
+// ---------------------------------------------------------------------------
+// Activity and exports (phase 9): the project's append-only story. Exports are
+// log records, never passes or assets; activity records every run, decision,
+// and export with enough detail to reconstruct the work afterward.
+// ---------------------------------------------------------------------------
+
+export const exports = pgTable(
+  "exports",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    assetId: text("asset_id")
+      .notNull()
+      .references(() => assets.id, { onDelete: "cascade" }),
+    format: text("format").notNull(), // png | jpeg | webp
+    storageKey: text("storage_key").notNull(),
+    bytes: integer("bytes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("exports_project_idx").on(table.projectId, table.createdAt)],
+);
+
+export const activityLog = pgTable(
+  "activity_log",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    actor: text("actor").notNull(), // operator | system
+    action: text("action").notNull(), // pass.run | tool.upscale | export | review | ...
+    detail: jsonb("detail").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("activity_project_idx").on(table.projectId, table.createdAt)],
+);

@@ -68,7 +68,7 @@ export async function listPassesWithAssets(projectId: string) {
 export type NewPassInput = {
   projectId: string;
   prompt: string;
-  modelId: string;
+  modelId: string | null;
   batchSize: number;
   aspect: string;
   seed: number | null;
@@ -88,7 +88,7 @@ export async function createPass(input: NewPassInput) {
     kind: "generate",
     status: "draft",
     prompt: input.prompt.trim(),
-    modelId: input.modelId,
+    modelId: input.modelId ?? null,
     batchSize: input.batchSize,
     settings: { aspect: input.aspect, seed: input.seed },
   });
@@ -191,4 +191,40 @@ export async function setAssetReview(
     throw new Error("unknown asset");
   }
   await db.update(schema.assets).set({ reviewStatus: review }).where(eq(schema.assets.id, assetId));
+}
+
+/** Append-only activity entry; never throws into the caller's path. */
+export async function logActivity(projectId: string, action: string, detail: Record<string, unknown>) {
+  await db.insert(schema.activityLog).values({
+    id: crypto.randomUUID(),
+    projectId,
+    actor: "operator",
+    action,
+    detail,
+  }).catch(() => undefined);
+}
+
+export async function listActivity(projectId: string, limit = 20) {
+  return db
+    .select()
+    .from(schema.activityLog)
+    .where(eq(schema.activityLog.projectId, projectId))
+    .orderBy(schema.activityLog.createdAt)
+    .limit(limit);
+}
+
+export async function listExports(projectId: string) {
+  return db
+    .select()
+    .from(schema.exports)
+    .where(eq(schema.exports.projectId, projectId))
+    .orderBy(schema.exports.createdAt);
+}
+
+export async function logReviewActivity(
+  projectId: string,
+  assetId: string,
+  review: string,
+) {
+  await logActivity(projectId, "review", { assetId, review });
 }

@@ -4,7 +4,9 @@ import { db, schema } from "@/db";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { RegistryError, resolveImageModel } from "@/lib/models/server";
-import { getPassForUser, sizeForAspect, touchProject } from "@/lib/studio/queries";
+import { getPassForUser, logActivity, sizeForAspect, touchProject } from "@/lib/studio/queries";
+import { runInpaint, runOutpaint, runUpscale, type ToolOutcome } from "@/lib/studio/run-tools";
+import type { Direction } from "@/lib/studio/tools";
 import { storage } from "@/lib/storage";
 import { budgetDecision } from "@/lib/usage/core";
 import { budgetCapUsd, spendTodayUsd, writeUsageEvent } from "@/lib/usage/queries";
@@ -34,54 +36,59 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   if (pass.status === "running") {
     return Response.json({ error: "already-running" }, { status: 409 });
   }
-  if (pass.prompt.trim().length === 0) {
+  const isTool = pass.kind !== "generate";
+  if (!isTool && pass.prompt.trim().length === 0) {
     return Response.json({ error: "empty-prompt" }, { status: 400 });
   }
-  if (!pass.modelId) {
+  if (!pass.modelId && pass.kind !== "upscale") {
     return Response.json({ error: "no-model" }, { status: 400 });
   }
 
-  const [modelRow] = await db.select().from(schema.models).where(eq(schema.models.id, pass.modelId)).limit(1);
-  if (!modelRow) {
-    return Response.json({ error: "unknown-model" }, { status: 400 });
-  }
-
-  let imageModel;
-  try {
-    imageModel = resolveImageModel({
-      id: modelRow.id,
-      displayName: modelRow.displayName,
-      provider: modelRow.provider,
-      modality: modelRow.modality,
-      modelName: modelRow.modelName,
-      capabilities: (modelRow.capabilities as string[]) ?? [],
-      contextWindow: modelRow.contextWindow,
-      enabled: modelRow.enabled,
-      isMock: modelRow.isMock,
-    });
-  } catch (error) {
-    if (error instanceof RegistryError) {
-      return Response.json(
-        { error: error.code, message: error.message },
-        { status: error.code === "needs-key" ? 409 : 400 },
-      );
+  let modelRow = null;
+  let imageModel = null;
+  if (pass.modelId) {
+    [modelRow] = await db.select().from(schema.models).where(eq(schema.models.id, pass.modelId)).limit(1);
+    if (!modelRow) {
+      return Response.json({ error: "unknown-model" }, { status: 400 });
     }
-    throw error;
+    try {
+      imageModel = resolveImageModel({
+        id: modelRow.id,
+        displayName: modelRow.displayName,
+        provider: modelRow.provider,
+        modality: modelRow.modality,
+        modelName: modelRow.modelName,
+        capabilities: (modelRow.capabilities as string[]) ?? [],
+        contextWindow: modelRow.contextWindow,
+        enabled: modelRow.enabled,
+        isMock: modelRow.isMock,
+      });
+    } catch (error) {
+      if (error instanceof RegistryError) {
+        return Response.json(
+          { error: error.code, message: error.message },
+          { status: error.code === "needs-key" ? 409 : 400 },
+        );
+      }
+      throw error;
+    }
   }
 
   // Budget gate before any provider work: the batch is the estimate.
-  const prices: PriceRow[] = (
-    await db.select().from(schema.modelPrices).where(eq(schema.modelPrices.modelId, pass.modelId))
-  ).map((row) => ({
+  const prices: PriceRow[] = pass.modelId
+    ? (
+        await db.select().from(schema.modelPrices).where(eq(schema.modelPrices.modelId, pass.modelId))
+      ).map((row) => ({
     modelId: row.modelId,
     effectiveFrom: row.effectiveFrom,
     inputPerMtok: row.inputPerMtok,
     outputPerMtok: row.outputPerMtok,
-    perImage: row.perImage,
-    perVideoSecond: row.perVideoSecond,
-  }));
+        perImage: row.perImage,
+        perVideoSecond: row.perVideoSecond,
+      }))
+    : [];
   const price = priceEffectiveAt(prices, new Date());
-  const estimate = price?.perImage ? Number(price.perImage) * pass.batchSize : 0;
+  const estimate = price?.perImage && pass.kind === "generate" ? Number(price.perImage) * pass.batchSize : 0;
   const decision = budgetDecision(await spendTodayUsd(session.user.id), await budgetCapUsd(session.user.id), estimate);
   if (!decision.allowed) {
     return Response.json(
@@ -125,7 +132,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   // The base reference feeds edit-capable providers as the input image.
   const baseReference = references.find((reference) => reference.role === "base");
   let baseBytes: Uint8Array | null = null;
-  if (baseReference && !modelRow.isMock) {
+  if (baseReference && modelRow && !modelRow.isMock) {
     const [asset] = await db
       .select()
       .from(schema.assets)
@@ -158,15 +165,87 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       .where(and(eq(schema.assets.passId, pass.id), eq(schema.assets.isActive, true)));
   }
 
+  // Tool passes: one enriched asset from the approved base reference.
+  if (isTool) {
+    const baseRef = references.find((reference) => reference.role === "base");
+    if (!baseRef) {
+      await db.update(schema.passes).set({ status: "failed", error: "tool passes require an approved base reference", updatedAt: new Date() }).where(eq(schema.passes.id, pass.id));
+      return Response.json({ error: "no-base-reference" }, { status: 400 });
+    }
+    const [baseAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, baseRef.assetId)).limit(1);
+    if (!baseAsset) {
+      return Response.json({ error: "missing-base-asset" }, { status: 400 });
+    }
+    const baseBytes = new Uint8Array((await storage.get(baseAsset.storageKey)).bytes);
+    const toolSettings = (pass.settings ?? {}) as {
+      factor?: number;
+      direction?: Direction;
+      percent?: number;
+      maskDataUrl?: string;
+    };
+
+    let outcome: ToolOutcome;
+    if (pass.kind === "upscale") {
+      outcome = await runUpscale(baseBytes, toolSettings.factor ?? 2);
+    } else if (pass.kind === "outpaint") {
+      outcome = await runOutpaint({
+        base: baseBytes,
+        direction: toolSettings.direction ?? "right",
+        percent: toolSettings.percent ?? 50,
+        prompt: pass.prompt,
+        seed: typeof settings.seed === "number" ? settings.seed : 0,
+        model: imageModel,
+        isMock: modelRow?.isMock ?? true,
+      });
+    } else {
+      if (!toolSettings.maskDataUrl) {
+        await db.update(schema.passes).set({ status: "failed", error: "inpaint requires a painted mask", updatedAt: new Date() }).where(eq(schema.passes.id, pass.id));
+        return Response.json({ error: "no-mask" }, { status: 400 });
+      }
+      outcome = await runInpaint({
+        base: baseBytes,
+        maskDataUrl: toolSettings.maskDataUrl,
+        prompt: pass.prompt,
+        seed: typeof settings.seed === "number" ? settings.seed : 0,
+        model: imageModel,
+        isMock: modelRow?.isMock ?? true,
+      });
+    }
+
+    const { key } = await storage.put(outcome.bytes, "image/png");
+    await db.insert(schema.assets).values({
+      id: crypto.randomUUID(),
+      passId: pass.id,
+      storageKey: key,
+      mime: "image/png",
+      width: outcome.width,
+      height: outcome.height,
+      isActive: true,
+    });
+    await db.update(schema.passes).set({ status: "completed", updatedAt: new Date() }).where(eq(schema.passes.id, pass.id));
+    if (modelRow && pass.kind !== "upscale") {
+      await writeUsageEvent({
+        userId: session.user.id,
+        modelId: pass.modelId!,
+        kind: "image",
+        inputTokens: 0,
+        outputTokens: 0,
+        imageCount: 1,
+      });
+    }
+    await logActivity(project.id, `tool.${pass.kind}`, { passId: pass.id, note: outcome.note });
+    await touchProject(project.id);
+    return Response.json({ status: "completed", note: outcome.note });
+  }
+
   try {
     for (let slot = 0; slot < pass.batchSize; slot++) {
       const seed = baseSeed + slot;
       const { image } = await generateImage({
-        model: imageModel,
+        model: imageModel!,
         prompt: pass.prompt,
         size,
         seed,
-        ...(baseBytes ? { images: [baseBytes] } : {}),
       });
       const bytes = image.uint8Array;
       const { key } = await storage.put(bytes, "image/png");
@@ -190,12 +269,13 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       .where(eq(schema.passes.id, pass.id));
     await writeUsageEvent({
       userId: session.user.id,
-      modelId: pass.modelId,
+      modelId: pass.modelId!,
       kind: "image",
       inputTokens: 0,
       outputTokens: 0,
       imageCount: pass.batchSize,
     });
+    await logActivity(project.id, "pass.run", { passId: pass.id, kind: pass.kind, batchSize: pass.batchSize, modelId: pass.modelId });
     await touchProject(project.id);
 
     return Response.json({ status: "completed", batchSize: pass.batchSize });

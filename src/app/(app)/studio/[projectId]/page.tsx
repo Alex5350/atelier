@@ -1,12 +1,20 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/session";
-import { eligibleReferenceAssets, getProject, lineageEdges, listPassesWithAssets } from "@/lib/studio/queries";
+import {
+  eligibleReferenceAssets,
+  getProject,
+  lineageEdges,
+  listActivity,
+  listExports,
+  listPassesWithAssets,
+} from "@/lib/studio/queries";
 import { imageModelChoices } from "@/lib/models/registry";
 import { liveProviderStatuses } from "@/lib/models/server";
 import { PassComposer } from "@/components/studio/pass-composer";
 import { PassTimeline } from "@/components/studio/pass-timeline";
 import { LineageCard } from "@/components/studio/lineage-graph";
+import { ActivityCard } from "@/components/studio/activity-card";
 import { db } from "@/db";
 import { schema } from "@/db";
 import { MotionStagger, MotionItem } from "@/components/app/motion";
@@ -45,6 +53,8 @@ export default async function ProjectPage({
   const assetTotal = passes.reduce((sum, pass) => sum + pass.assets.length, 0);
   const references = await eligibleReferenceAssets(projectId);
   const lineage = await lineageEdges(projectId);
+  const activity = await listActivity(projectId);
+  const projectExports = await listExports(projectId);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -77,6 +87,10 @@ export default async function ProjectPage({
 
       <PassTimeline passes={passes} lineage={lineage} />
       <LineageCard passes={passes} lineage={lineage} />
+      <ActivityCard
+        activity={activity.map((entry) => ({ ...entry, detail: (entry.detail ?? {}) as Record<string, unknown> }))}
+        exports={projectExports}
+      />
     </div>
   );
 }

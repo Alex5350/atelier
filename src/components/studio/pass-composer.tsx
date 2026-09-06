@@ -15,10 +15,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Loader2, Layers } from "lucide-react";
+import { Sparkles, Loader2, Layers, Wand2, Expand, ArrowUpRight } from "lucide-react";
 import type { ImageModelChoice } from "@/lib/models/registry";
+import { MaskCanvas } from "./mask-canvas";
 
 export type ReferenceChoice = { id: string; passSeq: number; seed: number | null };
+type ToolKind = "generate" | "upscale" | "outpaint" | "inpaint";
+const TOOLS: Array<{ value: ToolKind; label: string; icon: typeof Sparkles }> = [
+  { value: "generate", label: "Generate", icon: Sparkles },
+  { value: "inpaint", label: "Inpaint", icon: Wand2 },
+  { value: "outpaint", label: "Outpaint", icon: Expand },
+  { value: "upscale", label: "Upscale", icon: ArrowUpRight },
+];
 
 const BATCHES = [1, 2, 4, 6, 8];
 const ASPECTS = [
@@ -50,6 +58,11 @@ export function PassComposer({
   const [seed, setSeed] = useState("");
   const [baseId, setBaseId] = useState("none");
   const [styleIds, setStyleIds] = useState<string[]>([]);
+  const [kind, setKind] = useState<ToolKind>("generate");
+  const [factor, setFactor] = useState(2);
+  const [direction, setDirection] = useState("right");
+  const [percent, setPercent] = useState(50);
+  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
 
   const anyMock = models.some((model) => model.isMock);
 
@@ -81,6 +94,15 @@ export function PassComposer({
           aspect,
           seed: seed.trim().length > 0 ? Number(seed) : null,
           references: referencePayload(),
+          kind,
+          toolSettings:
+            kind === "upscale"
+              ? { factor }
+              : kind === "outpaint"
+                ? { direction, percent }
+                : kind === "inpaint"
+                  ? { maskDataUrl: maskDataUrl ?? undefined }
+                  : undefined,
         }),
       });
       if (!created.ok) {
@@ -93,15 +115,20 @@ export function PassComposer({
       const { id } = (await created.json()) as { id: string };
       const ran = await fetch(`/api/passes/${id}/run`, { method: "POST" });
       const detail = (await ran.json().catch(() => null)) as
-        | { status?: string; error?: string; message?: string }
+        | { status?: string; error?: string; message?: string; note?: string }
         | null;
       if (!ran.ok || detail?.status === "failed") {
         toast.error(detail?.message ?? detail?.error ?? "The run failed");
       } else {
         toast.success(
-          detail?.status === "completed" ? `Pass complete: ${batchSize} asset(s)` : "Pass finished",
+          detail?.status === "completed"
+            ? detail.note
+              ? `Pass complete: ${detail.note}`
+              : `Pass complete: ${batchSize} asset(s)`
+            : "Pass finished",
         );
         setSeed("");
+        setMaskDataUrl(null);
       }
       startTransition(() => router.refresh());
     } finally {
@@ -131,9 +158,85 @@ export function PassComposer({
           rows={3}
           className="resize-none"
         />
+        <div className="flex flex-wrap gap-1.5">
+          {TOOLS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ${
+                kind === item.value
+                  ? "border-primary/50 bg-primary/15 text-primary"
+                  : "border-border/60 bg-muted/40 text-muted-foreground hover:bg-accent"
+              }`}
+              onClick={() => setKind(item.value)}
+            >
+              <item.icon className="size-3.5" aria-hidden />
+              {item.label}
+            </button>
+          ))}
+        </div>
+        {kind === "inpaint" ? (
+          <MaskCanvas
+            baseAssetUrl={baseId !== "none" ? `/api/assets/${baseId}` : null}
+            onChange={setMaskDataUrl}
+          />
+        ) : null}
+        {kind === "outpaint" ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-1">
+              <Label className="text-xs text-muted-foreground">Direction</Label>
+              <Select value={direction} onValueChange={(value) => value && setDirection(value)}>
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["left", "right", "up", "down"].map((option) => (
+                    <SelectItem key={option} value={option} className="capitalize">
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-xs text-muted-foreground">Extend by</Label>
+              <Select value={String(percent)} onValueChange={(value) => setPercent(Number(value))}>
+                <SelectTrigger className="w-24">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[25, 50, 100].map((option) => (
+                    <SelectItem key={option} value={String(option)}>
+                      {option}%
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        ) : null}
+        {kind === "upscale" ? (
+          <div className="grid w-fit gap-1">
+            <Label className="text-xs text-muted-foreground">Factor (deterministic Lanczos, no model)</Label>
+            <Select value={String(factor)} onValueChange={(value) => setFactor(Number(value))}>
+              <SelectTrigger className="w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[2, 3, 4].map((option) => (
+                  <SelectItem key={option} value={String(option)}>
+                    {option}x
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-end gap-3">
-          <div className="grid gap-1">
-            <Label className="text-xs text-muted-foreground">Model</Label>
+          <div className={`grid gap-1 ${kind === "upscale" ? "opacity-40" : ""}`}>
+            <Label className="text-xs text-muted-foreground">
+              Model{kind === "upscale" ? " (unused: deterministic)" : ""}
+            </Label>
             <Select value={modelId} onValueChange={(value) => value && setModelId(value)}>
               <SelectTrigger className="w-56">
                 <SelectValue />
@@ -244,7 +347,15 @@ export function PassComposer({
               </div>
             </>
           ) : null}
-          <Button onClick={() => void run()} disabled={working || prompt.trim().length === 0}>
+          <Button
+            onClick={() => void run()}
+            disabled={
+              working ||
+              (kind === "generate" && prompt.trim().length === 0) ||
+              (kind !== "generate" && baseId === "none") ||
+              (kind === "inpaint" && !maskDataUrl)
+            }
+          >
             {working ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
             Run pass
           </Button>
