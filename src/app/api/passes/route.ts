@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { createPass, getProject } from "@/lib/studio/queries";
+import { readJsonBody } from "@/lib/api";
 
 const ASPECTS = new Set(["square", "landscape", "portrait"]);
 
@@ -12,7 +13,8 @@ export async function POST(request: Request) {
   if (!session) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = (await request.json()) as {
+
+  const parsed = await readJsonBody<{
     projectId?: string;
     prompt?: string;
     modelId?: string;
@@ -22,7 +24,11 @@ export async function POST(request: Request) {
     kind?: "generate" | "upscale" | "outpaint" | "inpaint";
     toolSettings?: { factor?: number; direction?: string; percent?: number; maskDataUrl?: string };
     references?: Array<{ assetId: string; role: "base" | "style" }>;
-  };
+  }>(request);
+  if (!parsed.ok) {
+    return parsed.response;
+  }
+  const body = parsed.body;
 
   const kind0 = body.kind ?? "generate";
   if (!body.projectId || (kind0 === "generate" && (!body.prompt || body.prompt.trim().length === 0))) {
