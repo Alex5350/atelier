@@ -28,15 +28,19 @@ export default async function ConversationPage({
     notFound();
   }
 
-  const stored = isNew ? [] : await listMessages(conversationId);
+  const stored = isNew ? [] : await listMessages(conversationId, { limit: 50 });
   const initialMessages: UIMessage[] = isNew
     ? []
     : stored.map((row) => ({
         id: row.id,
         role: row.role as UIMessage["role"],
         parts: (row.parts as UIMessage["parts"]) ?? [],
-        metadata: row.modelId ? { modelId: row.modelId } : undefined,
+        metadata: {
+          modelId: row.modelId ?? undefined,
+          at: row.createdAt.toISOString(),
+        },
       }));
+  const hasEarlier = stored.length === 50;
 
   const modelRows = await db.select().from(schema.models);
   const models = chatModelChoices(
@@ -66,6 +70,7 @@ export default async function ConversationPage({
     <ChatView
       conversationId={isNew ? "pending" : conversationId}
       initialMessages={initialMessages}
+      hasEarlier={hasEarlier}
       models={models}
     />
   );

@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, Square, RotateCcw, Send, Paperclip, FileText, X } from "lucide-react";
+import { Sparkles, Square, RotateCcw, Send, Paperclip, FileText, X, Copy, Check } from "lucide-react";
 import type { ChatModelChoice } from "@/lib/models/registry";
 
 type PendingFile = {
@@ -43,15 +43,19 @@ type ChatMetadata = {
   demo?: boolean;
   conversationId?: string;
   sources?: CitationSource[];
+  /** Row creation time (ISO); the pagination cursor for earlier pages. */
+  at?: string;
 };
 
 export function ChatView({
   conversationId,
   initialMessages,
+  hasEarlier = false,
   models,
 }: {
   conversationId: string;
   initialMessages: UIMessage[];
+  hasEarlier?: boolean;
   models: ChatModelChoice[];
 }) {
   const defaultModel = models[0]?.id ?? "mock/atelier-muse";
@@ -62,6 +66,9 @@ export function ChatView({
 
   const [pending, setPending] = useState(false);
   const [uploads, setUploads] = useState<PendingFile[]>([]);
+  const [earlierLeft, setEarlierLeft] = useState(hasEarlier);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const { messages, sendMessage, status, stop, regenerate, error, setMessages } = useChat({
     id: conversationId,
@@ -128,10 +135,64 @@ export function ChatView({
           continue;
         }
         const uploaded = (await response.json()) as PendingFile;
-        setUploads((current) => [...current, uploaded]);
+        // The API seeds mode; the default keeps the toggle honest even if a
+        // future response shape drifts (undefined would strand it on
+        // "context", exactly the bug this default once fixed).
+        setUploads((current) => [...current, { ...uploaded, mode: uploaded.mode ?? "context" }]);
       }
     } finally {
       setPending(false);
+    }
+  }
+
+  async function copyReply(message: UIMessage) {
+    const text = message.parts
+      .filter((part): part is { type: "text"; text: string } => part.type === "text")
+      .map((part) => part.text)
+      .join("\n\n");
+    if (text.length === 0) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(message.id);
+      setTimeout(() => {
+        setCopiedId((current) => (current === message.id ? null : current));
+      }, 1_500);
+    } catch {
+      // Clipboard permission denied: the button simply does nothing rather
+      // than surfacing an error for what is a convenience.
+    }
+  }
+
+  // Conversations load their newest window; this walks backward a page at a
+  // time using the oldest message's row time as the cursor.
+  async function loadEarlier() {
+    const oldest = messages[0];
+    const cursor = (oldest?.metadata as ChatMetadata | undefined)?.at;
+    if (!oldest || !cursor || loadingEarlier) {
+      return;
+    }
+    setLoadingEarlier(true);
+    try {
+      const id = conversationRef.current || (conversationId === "pending" ? "" : conversationId);
+      if (!id) {
+        return;
+      }
+      const response = await fetch(
+        `/api/chat/${id}/messages?before=${encodeURIComponent(cursor)}`,
+      );
+      if (!response.ok) {
+        setEarlierLeft(false);
+        return;
+      }
+      const page = (await response.json()) as { messages: UIMessage[]; hasMore: boolean };
+      if (page.messages.length > 0) {
+        setMessages([...page.messages, ...messages]);
+      }
+      setEarlierLeft(page.hasMore);
+    } finally {
+      setLoadingEarlier(false);
     }
   }
 
@@ -162,6 +223,13 @@ export function ChatView({
     <div className="flex h-[calc(100vh-8.5rem)] flex-col">
       <ScrollArea className="flex-1 pr-3">
         <div className="mx-auto max-w-3xl space-y-6 pb-6">
+          {earlierLeft && messages.length > 0 ? (
+            <div className="flex justify-center pt-2">
+              <Button variant="outline" size="sm" disabled={loadingEarlier} onClick={() => void loadEarlier()}>
+                {loadingEarlier ? "Loading..." : "Load earlier messages"}
+              </Button>
+            </div>
+          ) : null}
           {messages.length === 0 ? (
             <div className="pt-16 text-center text-sm text-muted-foreground">
               Ask anything. The selected model streams its answer here, and the conversation is
@@ -244,6 +312,22 @@ export function ChatView({
                     ) : null,
                   )}
                 </div>
+                {message.role === "assistant" &&
+                message.parts.some((part) => part.type === "text") ? (
+                  <button
+                    type="button"
+                    aria-label={copiedId === message.id ? "Copied" : "Copy reply"}
+                    className="mt-1 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    onClick={() => void copyReply(message)}
+                  >
+                    {copiedId === message.id ? (
+                      <Check className="size-3" aria-hidden />
+                    ) : (
+                      <Copy className="size-3" aria-hidden />
+                    )}
+                    {copiedId === message.id ? "Copied" : "Copy"}
+                  </button>
+                ) : null}
               </div>
             );
           })}

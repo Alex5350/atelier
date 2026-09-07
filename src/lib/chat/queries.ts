@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { db, schema } from "@/db";
 
 /**
@@ -32,12 +32,31 @@ export async function getConversation(userId: string, conversationId: string) {
   return row ?? null;
 }
 
-export async function listMessages(conversationId: string) {
-  return db
+/**
+ * Newest-first window with a keyset cursor (`before` = createdAt of the
+ * oldest message currently shown), returned oldest-first so callers can
+ * prepend pages directly. Conversations grow without bound; the page never
+ * should.
+ */
+export async function listMessages(
+  conversationId: string,
+  opts: { before?: Date; limit?: number } = {},
+) {
+  const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
+  const rows = await db
     .select()
     .from(schema.messages)
-    .where(eq(schema.messages.conversationId, conversationId))
-    .orderBy(schema.messages.createdAt);
+    .where(
+      opts.before
+        ? and(
+            eq(schema.messages.conversationId, conversationId),
+            lt(schema.messages.createdAt, opts.before),
+          )
+        : eq(schema.messages.conversationId, conversationId),
+    )
+    .orderBy(desc(schema.messages.createdAt))
+    .limit(limit);
+  return rows.reverse();
 }
 
 /** Persists one message; idempotent by message id (client retries are safe). */
