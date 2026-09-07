@@ -8,6 +8,8 @@ import { storage } from "@/lib/storage";
 import { budgetDecision } from "@/lib/usage/core";
 import { budgetCapUsd, spendTodayUsd } from "@/lib/usage/queries";
 import { priceEffectiveAt, type PriceRow } from "@/lib/models/registry";
+import { readJsonBody } from "@/lib/api";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 /** Submits a video job: budget-gated, provider-resolved, first-frame optional. */
 export async function POST(request: Request) {
@@ -15,13 +17,23 @@ export async function POST(request: Request) {
   if (!session) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = (await request.json()) as {
+
+  const limited = rateLimitResponse(rateLimit("video-submit", session.user.id));
+  if (limited) {
+    return limited;
+  }
+
+  const parsed = await readJsonBody<{
     projectId?: string;
     prompt?: string;
     modelId?: string;
     seconds?: number;
     firstFrameAssetId?: string;
-  };
+  }>(request);
+  if (!parsed.ok) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   if (!body.projectId || !body.prompt?.trim()) {
     return Response.json({ error: "projectId and prompt are required" }, { status: 400 });
   }

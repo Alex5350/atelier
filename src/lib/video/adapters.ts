@@ -1,4 +1,5 @@
 import "server-only";
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import type { VideoProvider, VideoSubmitInput, VideoSubmitResult, VideoPollResult } from "./port";
 
 /**
@@ -10,7 +11,11 @@ import type { VideoProvider, VideoSubmitInput, VideoSubmitResult, VideoPollResul
 export class SoraProvider implements VideoProvider {
   readonly name = "openai";
 
-  constructor(private readonly apiKey: string, private readonly baseUrl = "https://api.openai.com/v1") {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly baseUrl = "https://api.openai.com/v1",
+    private readonly timeoutMs = 30_000,
+  ) {}
 
   async submit(input: VideoSubmitInput): Promise<VideoSubmitResult> {
     const body: Record<string, unknown> = {
@@ -21,11 +26,15 @@ export class SoraProvider implements VideoProvider {
     if (input.firstFrame) {
       body.input_reference = `data:image/png;base64,${Buffer.from(input.firstFrame).toString("base64")}`;
     }
-    const response = await fetch(`${this.baseUrl}/videos`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/videos`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      this.timeoutMs,
+    );
     if (!response.ok) {
       throw new Error(`sora submit failed: ${response.status} ${await response.text()}`);
     }
@@ -34,9 +43,11 @@ export class SoraProvider implements VideoProvider {
   }
 
   async poll(externalId: string): Promise<VideoPollResult> {
-    const response = await fetch(`${this.baseUrl}/videos/${externalId}`, {
-      headers: { authorization: `Bearer ${this.apiKey}` },
-    });
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/videos/${externalId}`,
+      { headers: { authorization: `Bearer ${this.apiKey}` } },
+      this.timeoutMs,
+    );
     if (!response.ok) {
       return { status: "failed", error: `sora poll failed: ${response.status}` };
     }
@@ -45,9 +56,11 @@ export class SoraProvider implements VideoProvider {
       error?: { message?: string };
     };
     if (json.status === "completed") {
-      const file = await fetch(`${this.baseUrl}/videos/${externalId}/content`, {
-        headers: { authorization: `Bearer ${this.apiKey}` },
-      });
+      const file = await fetchWithTimeout(
+        `${this.baseUrl}/videos/${externalId}/content`,
+        { headers: { authorization: `Bearer ${this.apiKey}` } },
+        this.timeoutMs,
+      );
       if (!file.ok) {
         return { status: "failed", error: `sora download failed: ${file.status}` };
       }
@@ -67,6 +80,7 @@ export class VeoProvider implements VideoProvider {
   constructor(
     private readonly apiKey: string,
     private readonly baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+    private readonly timeoutMs = 30_000,
   ) {}
 
   async submit(input: VideoSubmitInput): Promise<VideoSubmitResult> {
@@ -77,17 +91,21 @@ export class VeoProvider implements VideoProvider {
         mimeType: "image/png",
       };
     }
-    const response = await fetch(`${this.baseUrl}/models/${input.modelId}:predictLongRunning?key=${this.apiKey}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        instances,
-        parameters: {
-          durationSeconds: input.seconds,
-          sampleCount: 1,
-        },
-      }),
-    });
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/models/${input.modelId}:predictLongRunning?key=${this.apiKey}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          instances,
+          parameters: {
+            durationSeconds: input.seconds,
+            sampleCount: 1,
+          },
+        }),
+      },
+      this.timeoutMs,
+    );
     if (!response.ok) {
       throw new Error(`veo submit failed: ${response.status} ${await response.text()}`);
     }
@@ -96,7 +114,11 @@ export class VeoProvider implements VideoProvider {
   }
 
   async poll(externalId: string): Promise<VideoPollResult> {
-    const response = await fetch(`${this.baseUrl}/${externalId}?key=${this.apiKey}`);
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/${externalId}?key=${this.apiKey}`,
+      {},
+      this.timeoutMs,
+    );
     if (!response.ok) {
       return { status: "failed", error: `veo poll failed: ${response.status}` };
     }
@@ -115,7 +137,11 @@ export class VeoProvider implements VideoProvider {
     if (!uri) {
       return { status: "failed", error: "veo returned no video uri" };
     }
-    const file = await fetch(uri.includes("?") ? `${uri}&key=${this.apiKey}` : `${uri}?key=${this.apiKey}`);
+    const file = await fetchWithTimeout(
+      uri.includes("?") ? `${uri}&key=${this.apiKey}` : `${uri}?key=${this.apiKey}`,
+      {},
+      this.timeoutMs,
+    );
     if (!file.ok) {
       return { status: "failed", error: `veo download failed: ${file.status}` };
     }

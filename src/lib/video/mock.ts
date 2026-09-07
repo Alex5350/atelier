@@ -30,7 +30,12 @@ export class MockVideoProvider implements VideoProvider {
   async poll(externalId: string): Promise<VideoPollResult> {
     const job = this.jobs.get(externalId);
     if (!job) {
-      return { status: "failed", error: "unknown mock job" };
+      return {
+        status: "failed",
+        // In-memory renders do not survive a server restart; say so instead
+        // of leaking the provider's internal vocabulary.
+        error: "the demo renderer lost this job (in-memory renders clear on restart)",
+      };
     }
     // A short, realistic-seeming render window so the polling UI demonstrates.
     const elapsed = Date.now() - job.startedAt;
@@ -51,7 +56,6 @@ export class MockVideoProvider implements VideoProvider {
 async function renderReel(prompt: string, seconds: number): Promise<Uint8Array> {
   const ffmpegPath = await resolveFfmpeg();
   const hash = fnv(prompt);
-  const hue = hash % 360;
   const duration = Math.min(8, Math.max(2, seconds));
   const dir = await mkdtemp(join(tmpdir(), "atelier-reel-"));
 

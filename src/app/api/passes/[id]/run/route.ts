@@ -12,6 +12,7 @@ import { budgetDecision } from "@/lib/usage/core";
 import { budgetCapUsd, spendTodayUsd, writeUsageEvent } from "@/lib/usage/queries";
 import type { PriceRow } from "@/lib/models/registry";
 import { priceEffectiveAt } from "@/lib/models/registry";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const maxDuration = 120;
 
@@ -26,6 +27,12 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   if (!session) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  const limited = rateLimitResponse(rateLimit("pass-run", session.user.id));
+  if (limited) {
+    return limited;
+  }
+
   const { id } = await context.params;
   const owned = await getPassForUser(session.user.id, id);
   if (!owned) {
