@@ -9,12 +9,14 @@ import {
   listExports,
   listPassesWithAssets,
 } from "@/lib/studio/queries";
-import { imageModelChoices } from "@/lib/models/registry";
+import { listVideoJobs } from "@/lib/studio/video-queries";
+import { imageModelChoices, videoModelChoices } from "@/lib/models/registry";
 import { liveProviderStatuses } from "@/lib/models/server";
 import { PassComposer } from "@/components/studio/pass-composer";
 import { PassTimeline } from "@/components/studio/pass-timeline";
 import { LineageCard } from "@/components/studio/lineage-graph";
 import { ActivityCard } from "@/components/studio/activity-card";
+import { VideoCard } from "@/components/studio/video-card";
 import { db } from "@/db";
 import { schema } from "@/db";
 import { MotionStagger, MotionItem } from "@/components/app/motion";
@@ -55,6 +57,21 @@ export default async function ProjectPage({
   const lineage = await lineageEdges(projectId);
   const activity = await listActivity(projectId);
   const projectExports = await listExports(projectId);
+  const videoJobs = await listVideoJobs(projectId);
+  const videoModels = videoModelChoices(
+    modelRows.map((row) => ({
+      id: row.id,
+      displayName: row.displayName,
+      provider: row.provider,
+      modality: row.modality,
+      modelName: row.modelName,
+      capabilities: (row.capabilities as string[]) ?? [],
+      contextWindow: row.contextWindow,
+      enabled: row.enabled,
+      isMock: row.isMock,
+    })),
+    liveProviderStatuses(),
+  );
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -86,6 +103,9 @@ export default async function ProjectPage({
       </MotionItem>
 
       <PassTimeline passes={passes} lineage={lineage} />
+      {videoModels.length > 0 ? (
+        <VideoCard projectId={projectId} models={videoModels} references={references} jobs={videoJobs} />
+      ) : null}
       <LineageCard passes={passes} lineage={lineage} />
       <ActivityCard
         activity={activity.map((entry) => ({ ...entry, detail: (entry.detail ?? {}) as Record<string, unknown> }))}

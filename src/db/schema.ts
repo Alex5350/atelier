@@ -364,3 +364,31 @@ export const activityLog = pgTable(
   },
   (table) => [index("activity_project_idx").on(table.projectId, table.createdAt)],
 );
+
+// ---------------------------------------------------------------------------
+// Video (phase 10): jobs behind a provider port with a zero-key mock adapter.
+// Videos are project-level capabilities, not passes: the job row carries the
+// prompt, optional first frame, provider bookkeeping, and the stored result.
+// ---------------------------------------------------------------------------
+
+export const videoJobs = pgTable(
+  "video_jobs",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    modelId: text("model_id").references(() => models.id),
+    prompt: text("prompt").notNull(),
+    seconds: integer("seconds").notNull().default(4),
+    firstFrameAssetId: text("first_frame_asset_id").references(() => assets.id),
+    externalId: text("external_id"),
+    status: text("status").notNull().default("running"), // running | completed | failed
+    error: text("error"),
+    storageKey: text("storage_key"),
+    bytes: integer("bytes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("video_jobs_project_idx").on(table.projectId, table.createdAt)],
+);

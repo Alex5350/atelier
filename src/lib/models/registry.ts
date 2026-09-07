@@ -200,3 +200,28 @@ export function imageModelChoices(rows: ModelRow[], statuses: ProviderStatus[]):
   });
   return usable;
 }
+
+export function videoModelChoices(rows: ModelRow[], statuses: ProviderStatus[]): ImageModelChoice[] {
+  const choices = rows
+    .filter((row) => row.modality === "video")
+    .map((row) => {
+      const status = availability(row, statuses);
+      return {
+        id: row.id,
+        displayName: row.displayName,
+        provider: row.provider,
+        isMock: row.isMock,
+        status: status.status,
+        missingEnvVar: status.status === "needs-key" ? status.missingEnvVar : undefined,
+      };
+    });
+  const anyRealAvailable = choices.some((choice) => choice.status === "available" && !choice.isMock);
+  const usable = choices.filter((choice) => choice.status === "available");
+  usable.sort((a, b) => {
+    if (a.isMock !== b.isMock) {
+      return anyRealAvailable ? Number(a.isMock) - Number(b.isMock) : Number(b.isMock) - Number(a.isMock);
+    }
+    return a.displayName.localeCompare(b.displayName);
+  });
+  return usable;
+}

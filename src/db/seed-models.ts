@@ -151,6 +151,52 @@ const ROSTER: Array<{ model: SeedModel; prices: SeedPrice[] }> = [
   },
   {
     model: {
+      id: "mock/atelier-reel",
+      displayName: "Atelier Reel (demo)",
+      provider: "mock",
+      modality: "video",
+      modelName: "atelier-reel",
+      capabilities: ["video", "first-frame", "deterministic", "zero-key"],
+      enabled: true,
+      isMock: true,
+      notes: "Built-in demo video provider: renders original labeled clips with the bundled ffmpeg, no provider key.",
+    },
+    prices: [
+      { perVideoSecond: "0" },
+    ],
+  },
+  {
+    model: {
+      id: "openai/sora-2",
+      displayName: "Sora 2",
+      provider: "openai",
+      modality: "video",
+      modelName: "sora-2",
+      capabilities: ["video", "first-frame"],
+      enabled: true,
+      notes: "Price is an estimate for the usage ledger, not billing truth.",
+    },
+    prices: [
+      { perVideoSecond: "0.10" },
+    ],
+  },
+  {
+    model: {
+      id: "google/veo-3-fast",
+      displayName: "Veo 3 Fast",
+      provider: "google",
+      modality: "video",
+      modelName: "veo-3.0-generate-fast",
+      capabilities: ["video", "first-frame"],
+      enabled: true,
+      notes: "Price is an estimate for the usage ledger, not billing truth.",
+    },
+    prices: [
+      { perVideoSecond: "0.12" },
+    ],
+  },
+  {
+    model: {
       id: "openai/text-embedding-3-small",
       displayName: "Text Embedding 3 Small",
       provider: "openai",

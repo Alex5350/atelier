@@ -64,6 +64,13 @@
       "when": 1788880189890,
       "tag": "0008_long_slayback",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788880750902,
+      "tag": "0009_powerful_redwing",
+      "breakpoints": true
     }
   ]
 }
