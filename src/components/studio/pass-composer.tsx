@@ -299,7 +299,7 @@ export function PassComposer({
               <div className="grid gap-1">
                 <Label className="text-xs text-muted-foreground">Base (composition)</Label>
                 <Select value={baseId} onValueChange={(value) => setBaseId(value ?? "none")}>
-                  <SelectTrigger className="w-48">
+                  <SelectTrigger className="w-48" aria-label="Base reference">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

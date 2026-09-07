@@ -29,3 +29,10 @@ test("usage shows the ledger story and the budget editor", async ({ page }) => {
   await expect(page.getByText("Spent today", { exact: true })).toBeVisible();
   await expect(page.getByText("Daily budget")).toBeVisible();
 });
+
+test("an unknown page renders the honest 404", async ({ page }) => {
+  const response = await page.goto("/does-not-exist");
+  expect(response?.status()).toBe(404);
+  await expect(page.getByText("Nothing here")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to the dashboard" })).toBeVisible();
+});

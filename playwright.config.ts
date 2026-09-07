@@ -26,7 +26,8 @@ export default defineConfig({
     },
     {
       name: "app",
-      testMatch: /app\.spec\.ts/,
+      testMatch: /\.spec\.ts$/,
+      testIgnore: /gate\.spec\.ts/,
       use: {
         baseURL: process.env.ATELIER_BASE_URL ?? "http://localhost:3000",
         screenshot: "only-on-failure",
