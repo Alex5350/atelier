@@ -1,15 +1,20 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 import type { VideoProvider, VideoSubmitInput, VideoSubmitResult, VideoPollResult } from "./port";
 
 /**
- * The zero-key demo video provider: renders a deterministic labeled clip with
- * the bundled ffmpeg binary (ffmpeg-static). Palette and pacing derive from
- * the prompt hash; every frame is watermarked DEMO so mock output can never
- * masquerade as a real generation. The clip is an original composition, not
- * a copied sample.
+ * The zero-key demo video provider: renders a deterministic labeled clip.
+ * The title card is composed as an SVG and rasterized by sharp (identical
+ * toolchain to the demo image model), then ffmpeg only encodes it into a
+ * real MP4 with a slow hue drift. Text stays out of ffmpeg on purpose: the
+ * static linux build that ffmpeg-static ships has no drawtext filter at all
+ * (the macOS build does, which is exactly the kind of machine difference a
+ * provider should absorb). Every frame is watermarked DEMO so mock output
+ * can never masquerade as a real generation, and the clip is an original
+ * composition, not a copied sample.
  */
 export class MockVideoProvider implements VideoProvider {
   readonly name = "atelier";
@@ -47,42 +52,64 @@ async function renderReel(prompt: string, seconds: number): Promise<Uint8Array> 
   const ffmpegPath = await resolveFfmpeg();
   const hash = fnv(prompt);
   const hue = hash % 360;
-  const hue2 = (hue + 60) % 360;
-  const label = escapeDrawtext(prompt.trim().slice(0, 48) || "atelier");
   const duration = Math.min(8, Math.max(2, seconds));
   const dir = await mkdtemp(join(tmpdir(), "atelier-reel-"));
 
   try {
-    const pulse = Math.max(0.4, duration / 3).toFixed(2);
-    const bg = hslHex(hue, 40, 14);
-    const flash = hslHex(hue2, 60, 45);
-    const filter = [
-      `drawbox=x=0:y=0:w=iw:h=ih:color=${flash}:t=fill:enable='lt(mod(t,${pulse}),0.4)'`,
-      `drawtext=text='ATELIER DEMO REEL':fontcolor=0xE8B478:fontsize=30:x=(w-text_w)/2:y=(h-text_h)/2-20`,
-      `drawtext=text='${label}':fontcolor=0xB8A898:fontsize=16:x=(w-text_w)/2:y=(h-text_h)/2+24`,
-      `drawtext=text='DEMO zero-key render':fontcolor=0x8A7A6A:fontsize=12:x=(w-text_w)/2:y=h-28`,
-      "format=yuv420p",
-    ].join(",");
+    const card = await sharp(Buffer.from(titleCardSvg(prompt, hash)))
+      .png()
+      .toBuffer();
+    await writeFile(join(dir, "card.png"), card);
 
+    // Only core filters below (image2 loop, hue, format): no drawtext, no
+    // fonts, no build-dependent filters between us and a valid mp4.
+    const stderr: string[] = [];
     const code = await new Promise<number>((resolve, reject) => {
       const child = spawn(ffmpegPath, [
         "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", `color=c=${bg}:s=640x360:d=${duration}:r=24`,
-        "-vf", filter,
+        "-loop", "1", "-framerate", "24", "-t", String(duration), "-i", join(dir, "card.png"),
+        "-vf", "hue=h=t*8,format=yuv420p",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         join(dir, "reel.mp4"),
       ]);
+      child.stderr?.on("data", (chunk) => stderr.push(String(chunk)));
       child.on("error", reject);
       child.on("close", resolve);
     });
     if (code !== 0) {
-      throw new Error(`ffmpeg exited ${code}`);
+      throw new Error(`ffmpeg exited ${code}: ${stderr.join("").trim().slice(-400)}`);
     }
     const file = await readFile(join(dir, "reel.mp4"));
     return new Uint8Array(file);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/**
+ * The 640x360 title card: palette and geometry derive from the prompt hash
+ * (same deterministic recipe as the demo image model), with the fixed DEMO
+ * labeling layered on top.
+ */
+function titleCardSvg(prompt: string, hash: number): string {
+  const hue = hash % 360;
+  const label = escapeXml(prompt.trim().slice(0, 48) || "atelier");
+  const stripes = Array.from({ length: 5 }, (_, i) => {
+    const x = (hash >>> (i * 5)) % 560;
+    const h = 40 + ((hash >>> (i * 3)) % 160);
+    const fill = `hsl(${(hue + i * 24) % 360}, 45%, ${12 + i * 4}%)`;
+    return `<rect x="${x}" y="${340 - h}" width="14" height="${h}" rx="4" fill="${fill}" opacity="0.8"/>`;
+  }).join("");
+  const orb = `<circle cx="${120 + (hash % 400)}" cy="110" r="56" fill="hsl(${(hue + 60) % 360}, 60%, 45%)" opacity="0.35"/>`;
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">` +
+    `<rect width="640" height="360" fill="hsl(${hue}, 40%, 14%)"/>` +
+    orb + stripes +
+    `<text x="320" y="160" text-anchor="middle" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="30" fill="#E8B478" letter-spacing="6">ATELIER DEMO REEL</text>` +
+    `<text x="320" y="204" text-anchor="middle" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="16" fill="#B8A898">${label}</text>` +
+    `<text x="320" y="332" text-anchor="middle" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" fill="#8A7A6A">DEMO zero-key render</text>` +
+    `</svg>`
+  );
 }
 
 /**
@@ -111,27 +138,6 @@ async function resolveFfmpeg(): Promise<string> {
   return packaged;
 }
 
-/** HSL to ffmpeg hex color; ffmpeg rejects hsl() strings. */
-function hslHex(h: number, s: number, l: number): string {
-  const sat = s / 100;
-  const light = l / 100;
-  const chroma = (1 - Math.abs(2 * light - 1)) * sat;
-  const hp = h / 60;
-  const x = chroma * (1 - Math.abs((hp % 2) - 1));
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  if (hp < 1) [r, g, b] = [chroma, x, 0];
-  else if (hp < 2) [r, g, b] = [x, chroma, 0];
-  else if (hp < 3) [r, g, b] = [0, chroma, x];
-  else if (hp < 4) [r, g, b] = [0, x, chroma];
-  else if (hp < 5) [r, g, b] = [x, 0, chroma];
-  else [r, g, b] = [chroma, 0, x];
-  const m = light - chroma / 2;
-  const to255 = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
-  return `0x${to255(r)}${to255(g)}${to255(b)}`;
-}
-
 function fnv(value: string): number {
   let h = 2166136261;
   for (let i = 0; i < value.length; i++) {
@@ -141,7 +147,13 @@ function fnv(value: string): number {
   return h >>> 0;
 }
 
-function escapeDrawtext(value: string): string {
-  return value.replace(/[':\\]/g, " ").replace(/\s+/g, " ").trim();
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
+    .replace(/\s+/g, " ")
+    .trim();
 }
-

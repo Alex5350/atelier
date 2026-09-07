@@ -19,7 +19,9 @@ describe("the mock video provider", () => {
     // Wait past the render window.
     await new Promise((resolve) => setTimeout(resolve, 2_700));
     poll = await provider.poll(externalId);
-    expect(poll.status).toBe("completed");
+    // The message surfaces the provider's own error on CI, where the ffmpeg
+    // build differs from any local machine.
+    expect(poll.status, `render failed: ${poll.error}`).toBe("completed");
     const bytes = poll.video!;
     // MP4 container magic: 'ftyp' box early in the file.
     expect(bytes[4]).toBe(0x66);
