@@ -1,4 +1,5 @@
-import "server-only";
+// No "server-only" guard here: the pure helpers at the bottom are unit-tested
+// under bun, which resolves imports literally (Next would alias it anyway).
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 
@@ -13,8 +14,8 @@ export async function listProjects(userId: string) {
       id: schema.projects.id,
       title: schema.projects.title,
       updatedAt: schema.projects.updatedAt,
-      passCount: sql<number>`(select count(*) from ${schema.passes} where ${schema.passes.projectId} = ${schema.projects.id})::int`,
-      assetCount: sql<number>`(select count(*) from ${schema.assets} inner join ${schema.passes} on ${schema.passes.id} = ${schema.assets.passId} where ${schema.passes.projectId} = ${schema.projects.id})::int`,
+      passCount: sql<number>`(select count(*) from passes where passes.project_id = projects.id)::int`,
+      assetCount: sql<number>`(select count(*) from assets inner join passes on passes.id = assets.pass_id where passes.project_id = projects.id)::int`,
     })
     .from(schema.projects)
     .where(eq(schema.projects.userId, userId))
