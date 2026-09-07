@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/blob-report/
 
 # next.js
 /.next/
@@ -45,3 +48,4 @@ next-env.d.ts
 !docker-compose.yml
 !.env.example
 .data/
+e2e/.auth/

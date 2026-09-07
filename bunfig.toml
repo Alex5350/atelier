@@ -1,0 +1,4 @@
+# bun test discovers specs under src/ only; e2e/ belongs to the Playwright
+# runner (scripts/e2e.sh, `npx playwright test`), not to bun.
+[test]
+root = "./src"

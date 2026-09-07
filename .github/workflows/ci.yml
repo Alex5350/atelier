@@ -47,3 +47,51 @@ jobs:
           ATELIER_ADMIN_EMAIL=ci@atelier.local ATELIER_ADMIN_PASSWORD=ci-password-123 bun src/db/seed.ts
       - name: schema smoke check
         run: docker exec $(docker ps -q -f ancestor=pgvector/pgvector:pg17) psql -U atelier -d atelier -t -c "\dt" | grep -c -E "user|session|account|models|usage_events|budget_settings"
+
+  e2e:
+    name: e2e (playwright)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: atelier
+          POSTGRES_PASSWORD: atelier-dev
+          POSTGRES_DB: atelier
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U atelier -d atelier"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://atelier:atelier-dev@localhost:5432/atelier
+      BETTER_AUTH_SECRET: ci-secret-ci-secret-ci-secret-ci-secret
+      BETTER_AUTH_URL: http://localhost:3000
+      ATELIER_ADMIN_EMAIL: ci@atelier.local
+      ATELIER_ADMIN_PASSWORD: ci-password-123
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: npx playwright install --with-deps chromium
+      - run: bun run build
+      - run: bunx --bun drizzle-kit migrate
+      - run: bun src/db/seed.ts
+      - name: start production server
+        run: |
+          bun run start &
+          echo $! > server.pid
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000 -o /dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:3000 -o /dev/null
+      - name: run suite
+        run: npx playwright test
+      - name: stop server
+        if: always()
+        run: kill $(cat server.pid) 2>/dev/null || true

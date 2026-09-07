@@ -46,7 +46,7 @@ export function LineageCard({
     const index = Math.max(0, pass.assets.findIndex((asset) => asset.id === assetId));
     return 60 + (index % 2) * rowHeight + 24;
   };
-  const passY = (seq: number) => 60;
+  const passY = () => 60;
 
   return (
     <Card className="border-border/60 bg-card/60">
@@ -70,7 +70,7 @@ export function LineageCard({
             <g key={pass.id}>
               <rect
                 x={columnX(pass.seq) - 44}
-                y={passY(pass.seq) - 28}
+                y={passY() - 28}
                 width="112"
                 height={height - 60}
                 rx="10"
@@ -79,7 +79,7 @@ export function LineageCard({
               />
               <text
                 x={columnX(pass.seq) + 12}
-                y={passY(pass.seq) - 8}
+                y={passY() - 8}
                 textAnchor="middle"
                 font-size="11"
                 fill="hsl(var(--muted-foreground))"
@@ -108,7 +108,7 @@ export function LineageCard({
             }
             const fromX = columnX(referencedPass.seq) + 20;
             const fromY = assetY(referencedPass, edge.referencedAssetId);
-            const toY = passY(edge.referencingSeq) + 24;
+            const toY = passY() + 24;
             const midX = (fromX + referencingX) / 2;
             return (
               <path
