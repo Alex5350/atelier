@@ -29,15 +29,13 @@ export function AppSidebar({ userName, userEmail }: { userName: string; userEmai
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link href="/" />}>
-              <Link href="/">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
-                  <Palette className="size-4 text-primary" aria-hidden />
-                </div>
-                <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate font-heading font-semibold tracking-tight">Atelier</span>
-                  <span className="truncate text-xs text-muted-foreground">studio for making with AI</span>
-                </div>
-              </Link>
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/30">
+                <Palette className="size-4 text-primary" aria-hidden />
+              </div>
+              <div className="grid flex-1 text-left leading-tight">
+                <span className="truncate font-heading font-semibold tracking-tight">Atelier</span>
+                <span className="truncate text-xs text-muted-foreground">studio for making with AI</span>
+              </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -52,10 +50,8 @@ export function AppSidebar({ userName, userEmail }: { userName: string; userEmai
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton isActive={active} tooltip={item.title} render={<Link href={item.href} />}>
-                      <Link href={item.href}>
-                        <item.icon aria-hidden />
-                        <span>{item.title}</span>
-                      </Link>
+                      <item.icon aria-hidden />
+                      <span>{item.title}</span>
                     </SidebarMenuButton>
                     {item.badge ? <SidebarMenuBadge className="text-[10px]">{item.badge}</SidebarMenuBadge> : null}
                   </SidebarMenuItem>

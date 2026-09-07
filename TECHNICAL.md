@@ -58,7 +58,7 @@ The data model (`src/db/schema.ts`) is append-only where it matters:
 
 Tool passes run through a compositing seam rather than provider-native image editing, because this AI SDK version's `generateImage` takes no reference images or mask: `src/lib/studio/tools.ts` computes padding metrics (clamped 10-100%), extends the canvas with sharp, and builds an SVG mask whose white region marks what to fill; `run-tools.ts` generates at target size and composites only where the mask is opaque. Upscale is lanczos3 through sharp.
 
-One trap worth remembering: `listProjects` needs table-qualified column names in its subselects. Drizzle's `sql` template rendered unqualified `id` inside correlated subqueries, and Postgres threw `42702 ambiguous column`; the fix is literal SQL strings like `(select count(*) from passes where passes.project_id = projects.id)::int`.
+One trap worth remembering: `listProjects` needs table-qualified column names in its subselects. Drizzle's `sql` template rendered unqualified `id` inside correlated subqueries, and Postgres threw `42702 ambiguous column`; the fix is literal SQL strings like `(select count(*) from passes where passes.project_id = projects.id)::int`. Another: base-nova's `render={<Link/>}` already makes the component the link, so wrapping the children in a second `<Link>` produces nested anchors, which the browser splits apart mid-DOM; the sidebar shipped that way briefly (a double-height nav row, a clipped tagline, a highlight escaping the rail) until a real-browser pass caught it. Children go directly inside the rendered element.
 
 ## Video: a port with three implementations
 
