@@ -1,0 +1,198 @@
+{
+  "title": "Atelier: a creative studio that runs with zero API keys",
+  "subtitle": "every provider call passes the same three gates: the model registry (who may run), the budget gate (what it may cost), and the review trigger (what may be referenced) \u00b7 sky = user surface \u00b7 emerald = persistence \u00b7 amber = provider boundary \u00b7 rose = enforcement",
+  "chip": "registry \u00b7 budget \u00b7 review",
+  "width": 1300,
+  "height": 760,
+  "nodes": [
+    {
+      "id": "client",
+      "label": "BROWSER",
+      "lines": [
+        "chat composer + citations",
+        "studio timeline + masks",
+        "dark-only, Tailwind v4"
+      ],
+      "x": 60,
+      "y": 120
+    },
+    {
+      "id": "router",
+      "label": "APP ROUTER",
+      "lines": [
+        "typed API routes",
+        "rate limit: 429",
+        "malformed body: 400"
+      ],
+      "x": 420,
+      "y": 110
+    },
+    {
+      "id": "registry",
+      "label": "MODEL REGISTRY",
+      "lines": [
+        "models as rows",
+        "effective-dated prices",
+        "needs-key refusals"
+      ],
+      "x": 420,
+      "y": 380
+    },
+    {
+      "id": "budget",
+      "label": "BUDGET GATE",
+      "lines": [
+        "before every call",
+        "402 names the numbers",
+        "free models pass"
+      ],
+      "x": 760,
+      "y": 110
+    },
+    {
+      "id": "demo",
+      "label": "DEMO PROVIDERS",
+      "lines": [
+        "Muse: streams chat",
+        "Sketchpad: sharp SVG",
+        "Reel: ffmpeg mp4",
+        "watermarked DEMO"
+      ],
+      "x": 1080,
+      "y": 90,
+      "pulse": true
+    },
+    {
+      "id": "real",
+      "label": "REAL PROVIDERS",
+      "lines": [
+        "Anthropic \u00b7 OpenAI \u00b7 Google",
+        "keys optional, per surface",
+        "30s fetch timeout"
+      ],
+      "x": 1080,
+      "y": 330
+    },
+    {
+      "id": "postgres",
+      "label": "POSTGRES 17",
+      "lines": [
+        "conversations \u00b7 passes \u00b7 assets",
+        "usage_events pin prices",
+        "review TRIGGER on references",
+        "pgvector + FTS hybrid"
+      ],
+      "x": 760,
+      "y": 520
+    },
+    {
+      "id": "storage",
+      "label": "BLOB STORAGE",
+      "lines": [
+        "content-addressed",
+        "exports stored once",
+        "port: swap for S3"
+      ],
+      "x": 420,
+      "y": 580
+    },
+    {
+      "id": "ci",
+      "label": "CI + SECURITY",
+      "lines": [
+        "71 unit \u00b7 14 e2e",
+        "playwright over prod build",
+        "gitleaks \u00b7 CodeQL"
+      ],
+      "x": 60,
+      "y": 470
+    }
+  ],
+  "edges": [
+    {
+      "from": "client",
+      "to": "router",
+      "label": "turns, files, passes",
+      "color": "sky",
+      "path": "M300,150 C345,150 370,140 420,130",
+      "packet": true
+    },
+    {
+      "from": "router",
+      "to": "registry",
+      "label": "resolve + price",
+      "color": "amber",
+      "path": "M530,180 C530,255 530,300 530,380"
+    },
+    {
+      "from": "router",
+      "to": "budget",
+      "label": "estimate",
+      "color": "rose",
+      "path": "M640,130 C690,125 710,120 760,115",
+      "packet": true
+    },
+    {
+      "from": "budget",
+      "to": "demo",
+      "label": "zero-key path",
+      "color": "amber",
+      "path": "M900,110 C965,105 1010,100 1080,95",
+      "packet": true
+    },
+    {
+      "from": "budget",
+      "to": "real",
+      "label": "with keys",
+      "color": "amber",
+      "path": "M900,140 C980,200 1010,270 1080,335"
+    },
+    {
+      "from": "registry",
+      "to": "budget",
+      "label": "price row",
+      "color": "amber",
+      "direction": "backward",
+      "path": "M660,370 C720,320 710,210 790,150"
+    },
+    {
+      "from": "router",
+      "to": "postgres",
+      "label": "append-only rows",
+      "color": "emerald",
+      "path": "M640,180 C700,260 720,420 790,500"
+    },
+    {
+      "from": "postgres",
+      "to": "registry",
+      "label": "trigger 409",
+      "color": "rose",
+      "direction": "backward",
+      "path": "M770,490 C690,450 620,430 560,410"
+    },
+    {
+      "from": "demo",
+      "to": "storage",
+      "label": "asset bytes",
+      "color": "emerald",
+      "path": "M1080,150 C900,300 700,480 560,570",
+      "packet": true
+    },
+    {
+      "from": "postgres",
+      "to": "storage",
+      "label": "storage keys",
+      "color": "emerald",
+      "direction": "backward",
+      "path": "M740,560 C680,580 620,585 560,585"
+    },
+    {
+      "from": "ci",
+      "to": "router",
+      "label": "same artifact",
+      "color": "sky",
+      "direction": "backward",
+      "path": "M300,500 C370,420 360,250 430,175"
+    }
+  ]
+}

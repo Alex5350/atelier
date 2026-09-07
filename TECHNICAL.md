@@ -78,9 +78,21 @@ better-auth with the drizzle adapter: email/password, sessions, rate limiting on
 
 ## Testing
 
-- **Unit (bun test)**: registry availability and ordering, budget decision table, mock generators (magic bytes, dimensions, determinism), file chunking and RRF, image tool metrics.
-- **E2E (Playwright)**: a setup project signs in once via the API and saves `e2e/.auth/state.json`; `gate.spec.ts` runs cookie-less for the anonymous redirect test; `app.spec.ts` covers chat streaming + reload persistence, the studio and admin rosters, and the usage ledger. `scripts/e2e.sh` builds and boots the production server first, so the suite tests the shipped artifact. The runner is `npx playwright test`; bun's runner failed to build the spec graph.
+- **Unit (bun test)**: registry availability and ordering, budget decision table, rate limiter windows and key isolation, mock generators (magic bytes, dimensions, determinism), file chunking and RRF, image tool metrics, fetch timeout behavior, URL inlining for both string and URL-instance file data.
+- **E2E (Playwright)**: a setup project signs in once via the API and saves `e2e/.auth/state.json`; `gate.spec.ts` runs cookie-less for the anonymous redirect test; the app project covers chat streaming + reload persistence, file attachments in both modes with citation chips, the studio loop (generate, gate, approve, tool pass, export, regenerate), the video render, and a guardrails spec (typed 400/409/404, per-user 429 under a throwaway account, security headers). `scripts/e2e.sh` builds and boots the production server first, so the suite tests the shipped artifact. The runner is `npx playwright test`; bun's runner failed to build the spec graph.
+- The suite has caught four real defects that local clicking had not: the AI SDK's message conversion rejects relative file URLs (attachment turns 500'd), it wraps validated URLs in `URL` instances that a string-only type guard missed (so the inliner never ran and the SDK tried to download from localhost), the upload API omitted the attachment `mode` field (stranding the retrieval toggle on "context"), and the mask editor exported after the first stroke only. Each is pinned by a regression assertion or unit test now.
 - `e2e/shots.mjs` (node) captures the screenshots in `docs/screenshots/` at device pixel ratio 2.
+- **CI**: the verify job (typecheck, lint, unit tests, build, migrate, seed, schema smoke) and the e2e job run on every push, joined by a Security workflow (gitleaks over full history, CodeQL over the TypeScript sources, weekly schedule). Bun is pinned to 1.4.1 so runs are reproducible.
+
+## Hardening layer
+
+The API boundary treats abuse as a feature requirement, not an afterthought:
+
+- **Rate limiting** (`src/lib/rate-limit.ts`): fixed-window, per user, in front of every cost-bearing endpoint (chat 30/min, pass runs 10/min, video submits 5/min, uploads 20/min). Refusals are typed 429s with a `retry-after`. Single-node by design, matching the app's honest-scope posture; the budget gate caps dollars, this caps request rate.
+- **Security headers** (`next.config.ts`): nosniff, strict referrer policy, DENY framing, a locked-down permissions policy, and a conservative CSP (`default-src 'self'`, no plugin content, `frame-ancestors 'none'`). Scripts and styles keep `'unsafe-inline'` because Next's hydration bootstrap is inline; nonces are the documented next step.
+- **Body hardening** (`src/lib/api.ts`): every JSON POST parses through one guard, so malformed payloads are a typed 400 (this is also the edge a cross-site form hits) rather than a 500.
+- **Bounded provider calls** (`src/lib/video/fetch-with-timeout.ts`): every adapter fetch carries a 30s `AbortSignal.timeout`, and a hung provider fails with a message that names the timeout. Unit-tested against a local server that never responds.
+- **Export gating**: the export route enforces the same approval rule as the reference trigger (what has not been reviewed is not shippable), and the studio timeline exposes the export button only on approved assets.
 
 ## Decisions worth stealing
 

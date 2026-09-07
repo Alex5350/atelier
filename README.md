@@ -6,6 +6,12 @@ The live demo never calls out to a provider. Three built-in models, Atelier Muse
 
 ![The studio project view: pass cards with generated images, the composer, and the lineage graph](docs/screenshots/studio.png)
 
+## How it fits together
+
+![Architecture diagram: the browser talks to typed API routes; every provider call passes the model registry, the budget gate, and the review trigger before reaching demo or real providers; Postgres holds the append-only story and pgvector serves retrieval](docs/diagrams/architecture.svg)
+
+Every provider call passes the same three gates. The **model registry** decides who may run (a database row, priced, enabled). The **budget gate** decides what it may cost (a typed 402 refusal that names the numbers). The **review trigger** decides what may be referenced (a database trigger that refuses unapproved assets, with the same rule enforced by the export path). Demo and real providers sit behind one boundary, so the zero-key paths exercise identical code.
+
 ## What you can do in Atelier
 
 **Chat with models and files.** Conversations stream token by token, persist across reloads, and share a stable URL. Any registered chat model can be selected per turn, mid-conversation. Attach files in two modes: **context** mode feeds the document into the prompt (PDFs are parsed, long documents keep head and tail), while **retrieval** mode chunks and embeds the file into pgvector and grounds the reply in hybrid semantic + keyword search with `filename#chunk` citations.
@@ -45,15 +51,15 @@ To use a real provider, set one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GO
 ### Tests
 
 ```bash
-bun test                # unit: registry, budget math, mock generators, file pipeline
-bun run e2e             # Playwright: login gate, chat round trip, studio + admin, usage
+bun test                # unit: registry, budget math, rate limiter, mock generators, file pipeline
+bun run e2e             # Playwright: gate, chat + files + citations, studio loop, video, guardrails
 ```
 
 `bun run e2e` builds, migrates, seeds, boots the production server, and runs the suite against it, so the tests cover the app as shipped, not a dev-mode proxy.
 
 ## Stack
 
-Next.js (App Router) on Bun, TypeScript throughout, Tailwind CSS v4 with the shadcn base-nova component kit, AI SDK for the provider boundary, PostgreSQL 17 with pgvector and Drizzle migrations, better-auth for sessions, Playwright for end-to-end tests. One `docker run` (the database) is the only infrastructure.
+Next.js (App Router) on Bun, TypeScript throughout, Tailwind CSS v4 with the shadcn base-nova component kit, AI SDK for the provider boundary, PostgreSQL 17 with pgvector and Drizzle migrations, better-auth for sessions, Playwright for end-to-end tests. One `docker run` (the database) is the only infrastructure. The interface is deliberately dark-only: one carefully tuned palette instead of two half-tested ones.
 
 ## Project layout
 
