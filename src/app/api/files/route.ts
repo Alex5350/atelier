@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { extractText, kindFor, MAX_UPLOAD_BYTES } from "@/lib/files/extract";
 import { storage } from "@/lib/storage";
 import { indexDocument } from "@/lib/files/retrieval";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 /**
  * File upload: multipart in, storage blob plus a files row out, with text
@@ -14,6 +15,11 @@ export async function POST(request: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const limited = rateLimitResponse(rateLimit("upload", session.user.id));
+  if (limited) {
+    return limited;
   }
 
   const form = await request.formData();
@@ -72,6 +78,9 @@ export async function POST(request: Request) {
     kind,
     bytes: upload.size,
     url: `/api/files/${id}`,
+    // The chip's initial attachment mode: whole document into the prompt.
+    // The client toggles to retrieval per turn.
+    mode: "context" as const,
     extractedCharacters: extracted?.length ?? 0,
     chunks: chunkCount,
     indexedForRetrieval: chunkCount > 0,

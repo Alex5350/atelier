@@ -17,8 +17,10 @@ import type { PriceRow } from "@/lib/models/registry";
 import type { ModelMessage } from "ai";
 import { buildFileContextBlock } from "@/lib/files/extract";
 import { buildRetrievalBlock, searchChunks } from "@/lib/files/retrieval";
-import { inlineLocalFileParts } from "@/lib/chat/file-parts";
+import { absolutizeLocalFileUrls, inlineLocalFileParts } from "@/lib/chat/file-parts";
 import { storage } from "@/lib/storage";
+import { readJsonBody } from "@/lib/api";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const maxDuration = 60;
 
@@ -34,12 +36,21 @@ export async function POST(request: Request) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json()) as {
+  const limited = rateLimitResponse(rateLimit("chat", session.user.id));
+  if (limited) {
+    return limited;
+  }
+
+  const parsed = await readJsonBody<{
     messages: UIMessage[];
     conversationId?: string;
     modelId?: string;
     attachments?: Array<{ id: string; mode: "context" | "retrieval" }>;
-  };
+  }>(request);
+  if (!parsed.ok) {
+    return parsed.response;
+  }
+  const body = parsed.body;
 
   const registryId = body.modelId ?? "mock/atelier-muse";
   const [modelRow] = await db.select().from(schema.models).where(eq(schema.models.id, registryId)).limit(1);
@@ -216,13 +227,21 @@ export async function POST(request: Request) {
     }
   };
 
-  let modelMessages: ModelMessage[] = await convertToModelMessages(body.messages);
+  // Persisted history keeps relative file URLs; the SDK's URL validation
+  // (and real providers) need absolutes, so the model-bound copy gets them.
+  const forModel = absolutizeLocalFileUrls(body.messages, new URL(request.url).origin);
+  let modelMessages: ModelMessage[] = await convertToModelMessages(forModel);
   modelMessages = await inlineLocalFileParts(modelMessages, loader);
 
   const result = streamText({
     model: languageModel,
     messages: modelMessages,
     system: fileContext ?? undefined,
+    onError: (error) => {
+      // The client sees a generic error part; the server console keeps the
+      // real cause so streaming failures are diagnosable.
+      console.error("chat stream failed", error);
+    },
     onFinish: async ({ totalUsage }) => {
       // The ledger write: usage as the provider reported it, cost estimated
       // from the price row in effect right now (pinned by the write).

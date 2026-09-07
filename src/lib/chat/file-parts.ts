@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, UIMessage } from "ai";
 
 /**
  * Model-message post-processing for locally stored files: the UI references
@@ -24,7 +24,7 @@ export async function inlineLocalFileParts(
           if (part.type !== "file" || !isUrlFileData(part.data)) {
             return part;
           }
-          const id = localFileId(part.data.url);
+          const id = localFileId(urlToString(part.data.url));
           if (!id) {
             return part;
           }
@@ -47,20 +47,48 @@ export async function inlineLocalFileParts(
   );
 }
 
-/** Narrows the model file part's loose data union to the url shape. */
+/**
+ * History and the UI keep file URLs relative (/api/files/<id>: small rows,
+ * host-independent); the AI SDK validates url-shaped file data with the URL
+ * constructor, which throws on a relative path. This rewrites relative file
+ * part URLs to absolute for model conversion only; persisted history keeps
+ * the relative form.
+ */
+export function absolutizeLocalFileUrls(messages: UIMessage[], origin: string): UIMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) =>
+      part.type === "file" && typeof part.url === "string" && part.url.startsWith("/")
+        ? { ...part, url: origin + part.url }
+        : part,
+    ),
+  }));
+}
+
+/**
+ * Narrows the model file part's loose data union to the url shape. The url
+ * may arrive as a string or already wrapped in a URL instance: the AI SDK's
+ * message conversion validates url file data by constructing URL objects,
+ * and those instances are what reach the provider boundary.
+ */
 function isUrlFileData(
   data: unknown,
-): data is { type: "url"; url: string } {
+): data is { type: "url"; url: string | URL } {
+  const url = (data as { url?: unknown } | null)?.url;
   return (
     typeof data === "object" &&
     data !== null &&
     (data as { type?: unknown }).type === "url" &&
-    typeof (data as { url?: unknown }).url === "string"
+    (typeof url === "string" || url instanceof URL)
   );
+}
+
+function urlToString(url: string | URL): string {
+  return url instanceof URL ? url.href : url;
 }
 
 /** Recognizes this app's own file URLs and returns the id, or null. */
 export function localFileId(media: string): string | null {
-  const match = /^\/api\/files\/([0-9a-f-]{36})$/.exec(media);
+  const match = /(?:^|^[a-z]+:\/\/[^/]+)\/api\/files\/([0-9a-f-]{36})$/.exec(media);
   return match ? match[1] : null;
 }

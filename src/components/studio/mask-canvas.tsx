@@ -3,13 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Brush, Eraser, Trash2 } from "lucide-react";
+import { Brush, Eraser, Trash2, Undo2 } from "lucide-react";
 
 /**
  * The inpaint mask editor: paint over the base image; white strokes mark the
  * region to fill. The visible canvas shows the base dimmed for context; the
  * exported mask is a clean black canvas with white strokes at the base's
- * aspect, emitted as a PNG data URL.
+ * aspect, emitted as a PNG data URL after every completed stroke (so the
+ * composer always holds the mask as painted, not as of the first stroke).
+ * Single-level undo snaps back to before the last stroke; Cmd/Ctrl+Z works
+ * when the canvas is focused. Painting itself is pointer-driven: touchpads,
+ * trackpads, and mice all drive pointer events, but there is no keyboard
+ * path for freehand strokes (the honest alternative is not offering one
+ * badly).
  */
 export function MaskCanvas({
   baseAssetUrl,
@@ -21,8 +27,11 @@ export function MaskCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const baseRef = useRef<HTMLImageElement | null>(null);
   const drawing = useRef(false);
+  const stroked = useRef(false);
+  const undoSnapshot = useRef<ImageData | null>(null);
   const [tool, setTool] = useState<"brush" | "eraser">("brush");
   const [size, setSize] = useState(36);
+  const [canUndo, setCanUndo] = useState(false);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -55,6 +64,9 @@ export function MaskCanvas({
       context.fillStyle = "#222";
       context.fillRect(0, 0, canvas.width, canvas.height);
     }
+    stroked.current = false;
+    undoSnapshot.current = null;
+    setCanUndo(false);
     setDirty(false);
     onChange(null);
   }
@@ -73,9 +85,35 @@ export function MaskCanvas({
     context.beginPath();
     context.arc(x, y, size / 2, 0, Math.PI * 2);
     context.fill();
+    stroked.current = true;
     if (!dirty) {
       setDirty(true);
     }
+  }
+
+  /** A stroke ended: publish the mask as it now stands. */
+  function finishStroke() {
+    if (!drawing.current) {
+      return;
+    }
+    drawing.current = false;
+    if (stroked.current) {
+      onChange(exportMask());
+    }
+  }
+
+  /** Restores the snapshot taken before the last stroke began. */
+  function undo() {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    const snapshot = undoSnapshot.current;
+    if (!canvas || !context || !snapshot) {
+      return;
+    }
+    context.putImageData(snapshot, 0, 0);
+    undoSnapshot.current = null;
+    setCanUndo(false);
+    onChange(stroked.current ? exportMask() : null);
   }
 
   /** Exports the clean mask: strokes over solid black, no base preview. */
@@ -110,13 +148,6 @@ export function MaskCanvas({
     context.putImageData(data, 0, 0);
     return off.toDataURL("image/png");
   }
-
-  useEffect(() => {
-    if (dirty) {
-      onChange(exportMask());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty]);
 
   if (!baseAssetUrl) {
     return (
@@ -162,6 +193,16 @@ export function MaskCanvas({
           type="button"
           size="sm"
           variant="ghost"
+          className="h-8"
+          disabled={!canUndo}
+          onClick={undo}
+        >
+          <Undo2 className="size-3.5" aria-hidden /> Undo
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
           className="ml-auto h-8"
           onClick={() => {
             drawing.current = false;
@@ -175,21 +216,33 @@ export function MaskCanvas({
         ref={canvasRef}
         width={640}
         height={480}
-        className="w-full cursor-crosshair rounded-lg ring-1 ring-border/60"
+        tabIndex={0}
+        role="img"
+        aria-label="Inpaint mask: paint with the pointer to mark the region the model fills"
+        className="w-full cursor-crosshair rounded-lg ring-1 ring-border/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
         onPointerDown={(event) => {
+          const canvas = canvasRef.current;
+          const context = canvas?.getContext("2d");
+          if (canvas && context) {
+            undoSnapshot.current = context.getImageData(0, 0, canvas.width, canvas.height);
+            setCanUndo(true);
+          }
           drawing.current = true;
           paint(event);
         }}
         onPointerMove={paint}
-        onPointerUp={() => {
-          drawing.current = false;
-        }}
-        onPointerLeave={() => {
-          drawing.current = false;
+        onPointerUp={finishStroke}
+        onPointerLeave={finishStroke}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+            event.preventDefault();
+            undo();
+          }
         }}
       />
       <p className="text-xs text-muted-foreground">
-        White marks the region the model fills; everything else stays untouched.
+        White marks the region the model fills; everything else stays untouched. Undo
+        (or Cmd/Ctrl+Z while the canvas is focused) reverts the last stroke.
       </p>
     </div>
   );

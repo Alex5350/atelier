@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, RotateCcw, ThumbsUp, ThumbsDown, Undo2, Columns2, X } from "lucide-react";
+import { Loader2, RotateCcw, ThumbsUp, ThumbsDown, Undo2, Columns2, Download, X } from "lucide-react";
 import { reviewAsset } from "@/app/(app)/studio/[projectId]/actions";
 
 type LineageEdge = {
@@ -134,6 +134,7 @@ function PassCard({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const active = pass.assets.filter((asset) => asset.isActive);
   const superseded = pass.assets.filter((asset) => !asset.isActive);
 
@@ -155,6 +156,34 @@ function PassCard({
       startTransition(() => router.refresh());
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function exportAsset(assetId: string) {
+    if (exportingId) {
+      return;
+    }
+    setExportingId(assetId);
+    try {
+      const response = await fetch(`/api/assets/${assetId}/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ format: "png" }),
+      });
+      const detail = (await response.json().catch(() => null)) as
+        | { url?: string }
+        | null;
+      if (!response.ok) {
+        toast.error("Export failed: only approved assets can be exported");
+      } else {
+        toast.success("Exported as PNG; find it in the export log");
+        if (detail?.url) {
+          window.open(detail.url, "_blank", "noopener");
+        }
+        startTransition(() => router.refresh());
+      }
+    } finally {
+      setExportingId(null);
     }
   }
 
@@ -257,6 +286,21 @@ function PassCard({
                           onClick={() => void reviewAsset(asset.id, "pending").then(() => router.refresh())}
                         >
                           <Undo2 className="size-3" aria-hidden />
+                        </button>
+                      ) : null}
+                      {asset.reviewStatus === "approved" ? (
+                        <button
+                          type="button"
+                          title="Export as PNG"
+                          className="rounded p-0.5 text-muted-foreground hover:bg-accent"
+                          disabled={exportingId === asset.id}
+                          onClick={() => void exportAsset(asset.id)}
+                        >
+                          {exportingId === asset.id ? (
+                            <Loader2 className="size-3 animate-spin" aria-hidden />
+                          ) : (
+                            <Download className="size-3" aria-hidden />
+                          )}
                         </button>
                       ) : null}
                     </span>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelMessage } from "ai";
-import { inlineLocalFileParts, localFileId } from "./file-parts";
+import { absolutizeLocalFileUrls, inlineLocalFileParts, localFileId } from "./file-parts";
 
 const VALID = "3f1d2c84-9a6b-4d2e-8f7a-1b0c5d6e7f8a";
 
@@ -60,4 +60,66 @@ describe("inlining local file parts", () => {
     const processed = await inlineLocalFileParts(messages, async () => null);
     expect(processed[0]).toEqual(messages[0]);
   });
+});
+
+describe("absolutizing local file URLs for model conversion", () => {
+  test("relative file part URLs gain the origin; history-shaped parts pass through", () => {
+    const id = "2c0f2ba2-a2e4-4a9c-b69d-c3bf6a91670e";
+    const messages = [
+      {
+        id: "m1",
+        role: "user" as const,
+        parts: [
+          { type: "text" as const, text: "look" },
+          { type: "file" as const, mediaType: "text/markdown", filename: "a.md", url: `/api/files/${id}` },
+        ],
+      },
+    ];
+    const absolutized = absolutizeLocalFileUrls(messages, "http://localhost:3000");
+    expect((absolutized[0]!.parts[1] as { url: string }).url).toBe(
+      `http://localhost:3000/api/files/${id}`,
+    );
+    // The input is not mutated: persisted history stays relative.
+    expect((messages[0]!.parts[1] as { url: string }).url).toBe(`/api/files/${id}`);
+  });
+
+  test("already-absolute and non-file parts are untouched", () => {
+    const messages = [
+      {
+        id: "m2",
+        role: "user" as const,
+        parts: [
+          { type: "text" as const, text: "hi" },
+          { type: "file" as const, mediaType: "image/png", url: "https://example.com/x.png" },
+        ],
+      },
+    ];
+    const absolutized = absolutizeLocalFileUrls(messages, "http://localhost:3000");
+    expect((absolutized[0]!.parts[1] as { url: string }).url).toBe("https://example.com/x.png");
+  });
+
+  test("localFileId accepts both relative and absolute app file URLs", () => {
+    const id = "9996ec9a-6094-4979-bfe6-9cd8dab553ce";
+    expect(localFileId(`/api/files/${id}`)).toBe(id);
+    expect(localFileId(`http://localhost:3000/api/files/${id}`)).toBe(id);
+    expect(localFileId("https://elsewhere/api/files/x")).toBeNull();
+  });
+});
+
+test("url file data wrapped in a URL instance still inlines", async () => {
+  // The SDK's message conversion wraps validated URLs in URL instances;
+  // the inliner must see through both shapes.
+  const message = userMessage({
+    type: "file",
+    mediaType: "text/markdown",
+    data: { type: "url", url: new URL(`http://localhost:3000/api/files/${VALID}`) },
+  });
+  const out = await inlineLocalFileParts([message], async () => ({
+    mime: "text/markdown",
+    bytes: new Uint8Array([104, 105]),
+  }));
+  const part = (out[0] as { content: Array<{ data?: { type?: string; data?: string } }> })
+    .content[0]!;
+  expect(part.data?.type).toBe("data");
+  expect(part.data?.data).toBe("aGk=");
 });

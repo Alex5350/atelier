@@ -9,9 +9,11 @@ import { logActivity } from "@/lib/studio/queries";
 const FORMATS = new Set(["png", "jpeg", "webp"]);
 
 /**
- * Export converts the asset to a chosen format and records the download as an
- * export log row, never a pass or asset. The bytes land in storage exactly
- * once and the activity log ties the export to its source asset.
+ * Export converts an APPROVED asset to a chosen format and records the
+ * download as an export log row, never a pass or asset. The bytes land in
+ * storage exactly once and the activity log ties the export to its source
+ * asset. Approval is enforced here too: what has not been reviewed is not
+ * shippable, the same rule the reference trigger holds.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -34,6 +36,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     .limit(1);
   if (!row) {
     return Response.json({ error: "unknown-asset" }, { status: 404 });
+  }
+  if (row.asset.reviewStatus !== "approved") {
+    return Response.json(
+      { error: "asset-not-approved", message: "only approved assets can be exported" },
+      { status: 409 },
+    );
   }
 
   const source = await storage.get(row.asset.storageKey);
