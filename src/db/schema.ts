@@ -164,9 +164,13 @@ export const usageEvents = pgTable(
     imageCount: integer("image_count").notNull().default(0),
     videoSeconds: numeric("video_seconds", { precision: 10, scale: 2 }).notNull().default("0"),
     cost: numeric("cost", { precision: 12, scale: 6 }).notNull().default("0"),
+    conversationId: text("conversation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("usage_events_user_created_idx").on(table.userId, table.createdAt)],
+  (table) => [
+    index("usage_events_user_created_idx").on(table.userId, table.createdAt),
+    index("usage_events_conversation_idx").on(table.conversationId),
+  ],
 );
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,7 @@ export async function writeUsageEvent(input: {
     imageCount: input.imageCount ?? 0,
     videoSeconds: String(input.videoSeconds ?? 0),
     cost: cost.toFixed(6),
+    conversationId: input.conversationId ?? null,
   });
   return cost;
 }
@@ -160,4 +161,49 @@ export async function spendLast7DaysUsd(userId: string): Promise<Array<{ day: st
     .groupBy(sql`date_trunc('day', ${schema.usageEvents.createdAt})`)
     .orderBy(sql`date_trunc('day', ${schema.usageEvents.createdAt})`);
   return rows.map((row) => ({ day: row.day, cost: Number(row.cost) }));
+}
+
+export async function spendByConversationToday(userId: string) {
+  return db
+    .select({
+      conversationId: schema.usageEvents.conversationId,
+      cost: sql<string>`coalesce(sum(${schema.usageEvents.cost}), 0)::text`,
+      calls: sql<number>`count(*)::int`,
+    })
+    .from(schema.usageEvents)
+    .where(
+      and(
+        eq(schema.usageEvents.userId, userId),
+        gte(schema.usageEvents.createdAt, sql`date_trunc('day', now())`),
+        sql`${schema.usageEvents.conversationId} is not null`,
+      ),
+    )
+    .groupBy(schema.usageEvents.conversationId)
+    .orderBy(desc(sql`sum(${schema.usageEvents.cost})`))
+    .limit(6);
+}
+
+export async function conversationTitles(ids: string[]) {
+  if (ids.length === 0) {
+    return new Map<string, string>();
+  }
+  const { inArray } = await import("drizzle-orm");
+  const rows = await db
+    .select({ id: schema.conversations.id, title: schema.conversations.title })
+    .from(schema.conversations)
+    .where(inArray(schema.conversations.id, ids));
+  return new Map(rows.map((row) => [row.id, row.title]));
+}
+
+export async function spendLast30DaysUsd(userId: string): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<string>`coalesce(sum(${schema.usageEvents.cost}), 0)::text` })
+    .from(schema.usageEvents)
+    .where(
+      and(
+        eq(schema.usageEvents.userId, userId),
+        gte(schema.usageEvents.createdAt, sql`now() - interval '30 days'`),
+      ),
+    );
+  return Number(row?.total ?? 0);
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireSession } from "@/lib/session";
 import { listModelViews } from "@/lib/models/queries";
 import { ModelToggle } from "@/components/admin/model-toggle";
+import { AddModelForm, AddPriceForm } from "@/components/admin/model-editor";
 import { MotionStagger, MotionItem } from "@/components/app/motion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -93,8 +94,11 @@ export default async function AdminPage() {
       <MotionItem>
         <Card className="border-border/60 bg-card/60">
           <CardHeader>
-            <CardTitle className="font-heading">Registered models</CardTitle>
-            <CardDescription>{models.length} models across text, image, and embedding modalities.</CardDescription>
+            <div className="flex items-center justify-between">
+              <CardTitle className="font-heading">Registered models</CardTitle>
+              <AddModelForm />
+            </div>
+            <CardDescription>{models.length} models across text, image, video, and embedding modalities.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -146,7 +150,10 @@ export default async function AdminPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <ModelToggle modelId={model.id} enabled={model.enabled} />
+                      <span className="flex items-center justify-end gap-1">
+                        <AddPriceForm modelId={model.id} />
+                        <ModelToggle modelId={model.id} enabled={model.enabled} />
+                      </span>
                     </TableCell>
                   </TableRow>
                 ))}

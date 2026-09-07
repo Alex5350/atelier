@@ -3,8 +3,11 @@ import { requireSession } from "@/lib/session";
 import { formatUsd } from "@/lib/usage/core";
 import {
   budgetCapUsd,
+  conversationTitles,
   recentUsageEvents,
+  spendByConversationToday,
   spendByModelToday,
+  spendLast30DaysUsd,
   spendLast7DaysUsd,
   spendTodayUsd,
 } from "@/lib/usage/queries";
@@ -29,13 +32,16 @@ export const metadata: Metadata = { title: "Usage" };
 
 export default async function UsagePage() {
   const session = await requireSession();
-  const [spent, cap, byModel, events, week] = await Promise.all([
+  const [spent, cap, byModel, events, week, byConversation, monthTotal] = await Promise.all([
     spendTodayUsd(session.user.id),
     budgetCapUsd(session.user.id),
     spendByModelToday(session.user.id),
     recentUsageEvents(session.user.id),
     spendLast7DaysUsd(session.user.id),
+    spendByConversationToday(session.user.id),
+    spendLast30DaysUsd(session.user.id),
   ]);
+  const titles = await conversationTitles(byConversation.map((row) => row.conversationId!));
 
   const remaining = Math.max(0, cap - spent);
   const usedRatio = cap > 0 ? Math.min(1, spent / cap) : spent > 0 ? 1 : 0;
@@ -129,6 +135,26 @@ export default async function UsagePage() {
           </Card>
         </MotionItem>
       </MotionStagger>
+
+      {byConversation.length > 0 ? (
+        <MotionItem>
+          <Card className="border-border/60 bg-card/60">
+            <CardHeader className="pb-2">
+              <CardDescription>Spent today across conversations (30-day total {formatUsd(monthTotal)})</CardDescription>
+              <div className="space-y-1">
+                {byConversation.map((row) => (
+                  <div key={row.conversationId} className="flex items-center justify-between text-sm">
+                    <span className="truncate">{titles.get(row.conversationId!) ?? "a conversation"}</span>
+                    <span className="ml-3 shrink-0 tabular-nums text-muted-foreground">
+                      {row.calls} {row.calls === 1 ? "call" : "calls"} · {formatUsd(Number(row.cost))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CardHeader>
+          </Card>
+        </MotionItem>
+      ) : null}
 
       <MotionItem>
         <Card className="border-border/60 bg-card/60">
